@@ -1,7 +1,6 @@
 # Cariaco Lab Data Explorer
 
-Independent, static version of the Cariaco Lab Data Explorer. It does not use
-ChatGPT, the OpenAI API, a database, or an application server. Uploaded and
+Independent, static version of the Cariaco Lab Data Explorer. Uploaded and
 pasted datasets are processed in the visitor's browser.
 
 ## Local development
