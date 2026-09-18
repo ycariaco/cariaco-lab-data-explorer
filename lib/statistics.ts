@@ -374,17 +374,12 @@ export function spearmanCorrelation(
 }
 
 function normalCdf(value: number) {
-  const sign = value < 0 ? -1 : 1;
-  const x = Math.abs(value) / Math.sqrt(2);
-  const t = 1 / (1 + 0.3275911 * x);
-  const erf =
-    1 -
-    ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) *
-      t +
-      0.254829592) *
-      t *
-      Math.exp(-x * x);
-  return 0.5 * (1 + sign * erf);
+  if (!Number.isFinite(value)) return value < 0 ? 0 : 1;
+  if (value === 0) return 0.5;
+  const probability = regularizedGammaP(0.5, (value * value) / 2);
+  return value < 0
+    ? 0.5 * (1 - probability)
+    : 0.5 * (1 + probability);
 }
 
 function regularizedGammaP(shape: number, value: number) {
@@ -948,11 +943,7 @@ export function randomInterceptModel(
       }
     | undefined;
 
-  const candidates = [
-    0,
-    ...Array.from({ length: 81 }, (_, index) => 10 ** (-4 + index * 0.1)),
-  ];
-  for (const lambda of candidates) {
+  const evaluate = (lambda: number) => {
     const weightedColumns = transpose(design).map((column) =>
       applyRandomInterceptWeight(column, subjectIndices, lambda),
     );
@@ -963,7 +954,7 @@ export function randomInterceptModel(
     );
     const xtwx = multiply(transpose(design), transpose(weightedColumns));
     const xtwxInverse = inverse(xtwx);
-    if (!xtwxInverse) continue;
+    if (!xtwxInverse) return null;
     const beta = multiplyVector(
       xtwxInverse,
       multiplyVector(transpose(design), weightedResponse),
@@ -987,13 +978,49 @@ export function randomInterceptModel(
       (response.length - p) * Math.log(rss / (response.length - p)) +
       logDetV +
       logDeterminant(xtwx);
-    if (!best || objective < best.objective) {
-      best = { lambda, beta, xtwxInverse, rss, objective };
+    return { lambda, beta, xtwxInverse, rss, objective };
+  };
+
+  // Profile the REML objective over log(lambda), where lambda is the random-
+  // intercept variance divided by the residual variance. A continuous search
+  // avoids the material rounding introduced by the earlier coarse grid.
+  const zeroCandidate = evaluate(0);
+  if (zeroCandidate) best = zeroCandidate;
+  const goldenRatio = (Math.sqrt(5) - 1) / 2;
+  let lower = -12;
+  let upper = 12;
+  let firstPoint = upper - goldenRatio * (upper - lower);
+  let secondPoint = lower + goldenRatio * (upper - lower);
+  let firstCandidate = evaluate(Math.exp(firstPoint));
+  let secondCandidate = evaluate(Math.exp(secondPoint));
+  for (let iteration = 0; iteration < 100; iteration += 1) {
+    if (!firstCandidate || !secondCandidate) break;
+    if (firstCandidate.objective < secondCandidate.objective) {
+      upper = secondPoint;
+      secondPoint = firstPoint;
+      secondCandidate = firstCandidate;
+      firstPoint = upper - goldenRatio * (upper - lower);
+      firstCandidate = evaluate(Math.exp(firstPoint));
+    } else {
+      lower = firstPoint;
+      firstPoint = secondPoint;
+      firstCandidate = secondCandidate;
+      secondPoint = lower + goldenRatio * (upper - lower);
+      secondCandidate = evaluate(Math.exp(secondPoint));
+    }
+  }
+  for (const candidate of [firstCandidate, secondCandidate]) {
+    if (candidate && (!best || candidate.objective < best.objective)) {
+      best = candidate;
     }
   }
   if (!best) return null;
-  const df = response.length - p;
-  const sigmaSquared = best.rss / df;
+  const residualDf = response.length - p;
+  const denominatorDf = Math.max(
+    1,
+    response.length - subjectIndices.size - (coding.levels.length - 1),
+  );
+  const sigmaSquared = best.rss / residualDf;
   const coefficientIndices = Array.from(
     { length: p - 1 },
     (_, index) => index + 1,
@@ -1023,8 +1050,8 @@ export function randomInterceptModel(
     name: 'Random-intercept mixed model',
     statisticLabel: 'F',
     statistic: f,
-    degreesOfFreedom: `${df1}, ${df}`,
-    p: fRightTailP(f, df1, df),
+    degreesOfFreedom: `${df1}, ${denominatorDf}`,
+    p: fRightTailP(f, df1, denominatorDf),
     icc: best.lambda / (1 + best.lambda),
     detail: `Outcome ~ group + (1 | subject); ${subjectIndices.size} subjects. Approximate denominator degrees of freedom.`,
   };

@@ -1,7 +1,12 @@
 # Cariaco Lab Data Explorer
 
-Independent, static version of the Cariaco Lab Data Explorer. Uploaded and
+Independent, static version of the Cariaco Lab Data Explorer. It does not use
+ChatGPT, the OpenAI API, a database, or an application server. Uploaded and
 pasted datasets are processed in the visitor's browser.
+
+Version 1.0.1, updated 18 September 2026. See [VALIDATION.md](VALIDATION.md)
+for the implemented-method assumptions, the reproducible R benchmark, and the
+remaining limitations.
 
 ## Local development
 
@@ -19,6 +24,22 @@ pnpm build
 ```
 
 The deployable static website is generated in `dist/`.
+
+## Reproduce the statistical benchmark
+
+The benchmark requires R 4.6.1 with `car`, `jsonlite`, `nlme`, and `rstatix`,
+plus Python 3 for the comparison report.
+
+```bash
+mkdir -p validation/results
+pnpm validate:app
+pnpm validate:r
+pnpm validate:compare
+```
+
+This is a reference benchmark, not an independent or regulated software
+validation. Do not delete or weaken the method-specific cautions in the user
+interface.
 
 ## Free deployment with Cloudflare Pages
 

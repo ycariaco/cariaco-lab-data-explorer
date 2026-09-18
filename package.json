@@ -1,6 +1,6 @@
 {
   "name": "cariaco-lab-data-explorer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "engines": {
@@ -10,7 +10,10 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "format": "oxfmt"
+    "format": "oxfmt",
+    "validate:app": "node --experimental-strip-types validation/generate-app-results.mjs",
+    "validate:r": "Rscript validation/generate-r-results.R validation",
+    "validate:compare": "python3 validation/compare-results.py"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",

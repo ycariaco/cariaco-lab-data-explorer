@@ -3532,12 +3532,29 @@ export default function Home() {
 
           <div className="flex items-start gap-2 rounded-xl border border-primary/15 bg-white/70 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
             <Info className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
-            <p>
-              <strong className="text-foreground">Exploratory use:</strong> automated suggestions
-              cannot determine the experimental unit or replace a prespecified analysis plan.
-              Mixed-model denominator degrees of freedom are approximate, and no analysis
-              automatically excludes flagged observations.
-            </p>
+            <div className="space-y-1.5">
+              <p>
+                <strong className="text-foreground">Exploratory use:</strong> automated
+                suggestions cannot determine the experimental unit or replace a prespecified
+                analysis plan. Key calculations were benchmarked against R 4.6.1 on fixed
+                reference datasets; method-specific limitations still apply.
+              </p>
+              <p>
+                Version 1.0.1 · Updated 18 September 2026 ·{" "}
+                <a className="font-medium text-primary underline" href="/validation.html">
+                  Methods and benchmark
+                </a>{" "}
+                ·{" "}
+                <a
+                  className="font-medium text-primary underline"
+                  href="https://cariacolab.com/contact/"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Report an error
+                </a>
+              </p>
+            </div>
           </div>
         </section>
       </div>
