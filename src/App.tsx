@@ -754,7 +754,6 @@ export default function Home() {
   const [showGrid, setShowGrid] = useState(true);
   const [showPoints, setShowPoints] = useState(true);
   const [showErrorBars, setShowErrorBars] = useState(true);
-  const [showLabels, setShowLabels] = useState(false);
   const [volcanoLabelList, setVolcanoLabelList] = useState("");
   const [postHocEnabled, setPostHocEnabled] = useState(true);
   const [postHocAdjustment, setPostHocAdjustment] = useState<PostHocAdjustment>("holm");
@@ -2361,13 +2360,6 @@ export default function Home() {
                 ) : null}
                 {plotType === "volcano" ? (
                   <div className="grid gap-3 rounded-xl border border-primary/15 bg-primary/[0.025] p-3">
-                    <label className="flex items-center gap-2">
-                      <Checkbox
-                        checked={showLabels}
-                        onCheckedChange={(checked) => setShowLabels(Boolean(checked))}
-                      />{" "}
-                      Label all significant features
-                    </label>
                     <label className="grid gap-1.5 text-xs font-medium">
                       Label specific features or molecules
                       <Textarea
@@ -3443,9 +3435,6 @@ export default function Home() {
                               const specificallyRequested = requestedVolcanoLabels.has(
                                 payload.label.trim().toLocaleLowerCase(),
                               );
-                              const shouldShowLabel =
-                                specificallyRequested ||
-                                (showLabels && payload.direction !== "NS");
                               return (
                                 <g>
                                   <circle
@@ -3456,7 +3445,7 @@ export default function Home() {
                                     stroke={specificallyRequested ? "#111827" : "none"}
                                     strokeWidth={specificallyRequested ? 1.5 : 0}
                                   />
-                                  {shouldShowLabel ? (
+                                  {specificallyRequested ? (
                                     <text
                                       x={Number(props.cx) + 5}
                                       y={Number(props.cy) - 5}
@@ -3776,7 +3765,7 @@ export default function Home() {
                 reference datasets; method-specific limitations still apply.
               </p>
               <p>
-                Version 1.0.3 · Updated 19 September 2026 ·{" "}
+                Version 1.0.4 · Updated 19 September 2026 ·{" "}
                 <a
                   className="font-medium text-primary underline"
                   href="https://cariacolab.com/contact/"
