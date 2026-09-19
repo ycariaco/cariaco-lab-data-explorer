@@ -123,6 +123,21 @@ type GroupedSummary = GroupSummary & {
   factor2: string;
 };
 
+type HeatmapClusterNode = {
+  order: number[];
+  distance: number;
+  leaf?: number;
+  left?: HeatmapClusterNode;
+  right?: HeatmapClusterNode;
+};
+
+type DendrogramSegment = {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+};
+
 const demoRows: DataRow[] = [
   {
     sample_id: "P01",
@@ -558,13 +573,23 @@ function heatmapVectorDistance(first: number[], second: number[], method: Heatma
   );
 }
 
-function hierarchicalHeatmapOrder(
+function hierarchicalHeatmapClustering(
   matrix: number[][],
   linkage: Exclude<HeatmapLinkage, "none">,
   distanceMethod: HeatmapDistance,
 ) {
-  if (matrix.length < 2) return matrix.map((_, index) => index);
-  let clusters = matrix.map((_, index) => [index]);
+  if (matrix.length < 2) {
+    const order = matrix.map((_, index) => index);
+    return {
+      order,
+      root: order.length ? { order, distance: 0, leaf: order[0] } : null,
+    };
+  }
+  let clusters: HeatmapClusterNode[] = matrix.map((_, index) => ({
+    order: [index],
+    distance: 0,
+    leaf: index,
+  }));
 
   const centroid = (indices: number[]) =>
     matrix[0].map((_, column) => {
@@ -572,15 +597,17 @@ function hierarchicalHeatmapOrder(
       return values.length ? average(values) : Number.NaN;
     });
 
-  const clusterDistance = (first: number[], second: number[]) => {
+  const clusterDistance = (first: HeatmapClusterNode, second: HeatmapClusterNode) => {
     if (linkage === "ward") {
       return (
-        Math.sqrt((first.length * second.length) / (first.length + second.length)) *
-        heatmapVectorDistance(centroid(first), centroid(second), "euclidean")
+        Math.sqrt(
+          (first.order.length * second.order.length) /
+            (first.order.length + second.order.length),
+        ) * heatmapVectorDistance(centroid(first.order), centroid(second.order), "euclidean")
       );
     }
-    const distances = first.flatMap((firstIndex) =>
-      second.map((secondIndex) =>
+    const distances = first.order.flatMap((firstIndex) =>
+      second.order.map((secondIndex) =>
         heatmapVectorDistance(matrix[firstIndex], matrix[secondIndex], distanceMethod),
       ),
     );
@@ -627,11 +654,54 @@ function hierarchicalHeatmapOrder(
         }
       }
     }
-    const merged = orientedMerge(clusters[bestFirst], clusters[bestSecond]);
+    const first = clusters[bestFirst];
+    const second = clusters[bestSecond];
+    const merged: HeatmapClusterNode = {
+      order: orientedMerge(first.order, second.order),
+      distance: bestDistance,
+      left: first,
+      right: second,
+    };
     clusters = clusters.filter((_, index) => index !== bestFirst && index !== bestSecond);
     clusters.push(merged);
   }
-  return clusters[0];
+  return { order: clusters[0].order, root: clusters[0] };
+}
+
+function buildHeatmapDendrogram(
+  root: HeatmapClusterNode | null,
+  order: number[],
+  width: number,
+  cellSize: number,
+  top: number,
+) {
+  if (!root || order.length < 2) return [];
+  const segments: DendrogramSegment[] = [];
+  const rowPositions = new Map(
+    order.map((rowIndex, position) => [rowIndex, top + (position + 0.5) * cellSize]),
+  );
+  const maximumDistance = root.distance || 1;
+  const xForDistance = (distance: number) =>
+    width - (Math.max(0, distance) / maximumDistance) * (width - 8);
+
+  const visit = (node: HeatmapClusterNode): { x: number; y: number } => {
+    if (node.leaf !== undefined) {
+      return { x: width, y: rowPositions.get(node.leaf) ?? top };
+    }
+    if (!node.left || !node.right) return { x: width, y: top };
+    const left = visit(node.left);
+    const right = visit(node.right);
+    const x = xForDistance(node.distance);
+    segments.push(
+      { x1: x, y1: left.y, x2: left.x, y2: left.y },
+      { x1: x, y1: right.y, x2: right.x, y2: right.y },
+      { x1: x, y1: left.y, x2: x, y2: right.y },
+    );
+    return { x, y: (left.y + right.y) / 2 };
+  };
+
+  visit(root);
+  return segments;
 }
 
 export default function Home() {
@@ -666,8 +736,9 @@ export default function Home() {
     useState<Record<string, string>>(demoSeriesColorOverrides);
   const [pointColorMode, setPointColorMode] = useState<PointColorMode>("series");
   const [heatmapPalette, setHeatmapPalette] = useState<HeatmapPalette>("viridis");
-  const [heatmapLinkage, setHeatmapLinkage] = useState<HeatmapLinkage>("none");
+  const [heatmapLinkage, setHeatmapLinkage] = useState<HeatmapLinkage>("average");
   const [heatmapDistance, setHeatmapDistance] = useState<HeatmapDistance>("correlation");
+  const [showHeatmapValues, setShowHeatmapValues] = useState(false);
   const [pointSize, setPointSize] = useState(7);
   const [pointOpacity, setPointOpacity] = useState(78);
   const [titleFontSize, setTitleFontSize] = useState(18);
@@ -684,6 +755,7 @@ export default function Home() {
   const [showPoints, setShowPoints] = useState(true);
   const [showErrorBars, setShowErrorBars] = useState(true);
   const [showLabels, setShowLabels] = useState(false);
+  const [volcanoLabelList, setVolcanoLabelList] = useState("");
   const [postHocEnabled, setPostHocEnabled] = useState(true);
   const [postHocAdjustment, setPostHocAdjustment] = useState<PostHocAdjustment>("holm");
   const [postHocScope, setPostHocScope] = useState<PostHocScope>("all");
@@ -1336,12 +1408,44 @@ export default function Home() {
     [activeHeatmapColumns, rows],
   );
 
-  const heatmapRowOrder = useMemo(
+  const heatmapClustering = useMemo(
     () =>
       heatmapLinkage === "none"
-        ? heatmap.map((_, index) => index)
-        : hierarchicalHeatmapOrder(heatmap, heatmapLinkage, heatmapDistance),
+        ? { order: heatmap.map((_, index) => index), root: null }
+        : hierarchicalHeatmapClustering(heatmap, heatmapLinkage, heatmapDistance),
     [heatmap, heatmapLinkage, heatmapDistance],
+  );
+  const heatmapRowOrder = heatmapClustering.order;
+  const heatmapCellSize = Math.max(
+    24,
+    Math.min(
+      64,
+      Math.floor((plotWidth - 250) / Math.max(1, heatmap.length)),
+      Math.floor((plotHeight - 150) / Math.max(1, heatmap.length)),
+    ),
+  );
+  const heatmapDendrogramWidth = heatmapLinkage === "none" ? 0 : 96;
+  const heatmapMatrixTop = 12;
+  const heatmapMatrixSize = heatmapCellSize * heatmap.length;
+  const heatmapRowLabelWidth = 190;
+  const heatmapColumnLabelHeight = 170;
+  const heatmapSvgWidth = heatmapDendrogramWidth + heatmapMatrixSize + heatmapRowLabelWidth;
+  const heatmapSvgHeight = heatmapMatrixTop + heatmapMatrixSize + heatmapColumnLabelHeight;
+  const heatmapDendrogramSegments = useMemo(
+    () =>
+      buildHeatmapDendrogram(
+        heatmapClustering.root,
+        heatmapRowOrder,
+        heatmapDendrogramWidth,
+        heatmapCellSize,
+        heatmapMatrixTop,
+      ),
+    [
+      heatmapClustering.root,
+      heatmapRowOrder,
+      heatmapDendrogramWidth,
+      heatmapCellSize,
+    ],
   );
 
   const volcanoPoints = useMemo(() => {
@@ -1383,6 +1487,27 @@ export default function Home() {
     useSignificanceThreshold,
     pThreshold,
   ]);
+
+  const requestedVolcanoLabels = useMemo(
+    () =>
+      new Set(
+        volcanoLabelList
+          .split(/[\n,;]+/)
+          .map((label) => label.trim().toLocaleLowerCase())
+          .filter(Boolean),
+      ),
+    [volcanoLabelList],
+  );
+
+  const matchedVolcanoLabelCount = useMemo(
+    () =>
+      new Set(
+        volcanoPoints
+          .map((point) => point.label.trim().toLocaleLowerCase())
+          .filter((label) => requestedVolcanoLabels.has(label)),
+      ).size,
+    [requestedVolcanoLabels, volcanoPoints],
+  );
 
   const volcanoGroups = useMemo(
     () =>
@@ -1486,6 +1611,7 @@ export default function Home() {
     setPlotTitle("");
     setXLabel("");
     setYLabel("");
+    setVolcanoLabelList("");
     setError("");
   }
 
@@ -1556,6 +1682,9 @@ export default function Home() {
     setLabelVariable("sample_id");
     setHeatmapColumns(["bill_length_mm", "bill_depth_mm", "flipper_length_mm", "body_mass_g"]);
     setHeatmapPalette("viridis");
+    setHeatmapLinkage("average");
+    setHeatmapDistance("correlation");
+    setShowHeatmapValues(false);
     setPointColorMode("series");
     setSeriesColorOverrides(demoSeriesColorOverrides);
     if (fileInput.current) fileInput.current.value = "";
@@ -1944,6 +2073,21 @@ export default function Home() {
                       ))}
                     </NativeSelect>
                   </label>
+                  <label className="grid gap-1.5 text-xs font-medium">
+                    Molecules to label
+                    <Textarea
+                      className="min-h-20 resize-y bg-white text-xs"
+                      placeholder={"CYP19A1, HSD3B1, SOD1\nSeparate names with commas or new lines"}
+                      value={volcanoLabelList}
+                      onChange={(event) => setVolcanoLabelList(event.target.value)}
+                    />
+                    <span className="font-normal leading-relaxed text-muted-foreground">
+                      Case-insensitive exact matches from the selected feature-label column.
+                      {requestedVolcanoLabels.size
+                        ? ` ${matchedVolcanoLabelCount} of ${requestedVolcanoLabels.size} requested labels found.`
+                        : ""}
+                    </span>
+                  </label>
                 </>
               ) : null}
               {plotType === "heatmap" ? (
@@ -1980,6 +2124,13 @@ export default function Home() {
                         </NativeSelectOption>
                       ))}
                     </NativeSelect>
+                  </label>
+                  <label className="flex items-center gap-2 text-xs font-medium">
+                    <Checkbox
+                      checked={showHeatmapValues}
+                      onCheckedChange={(checked) => setShowHeatmapValues(Boolean(checked))}
+                    />
+                    Show correlation values in cells
                   </label>
                 </>
               ) : null}
@@ -2230,6 +2381,7 @@ export default function Home() {
                       onCheckedChange={(checked) => setShowLabels(Boolean(checked))}
                     />{" "}
                     Label significant features
+                    Label all significant features
                   </label>
                 ) : null}
                 {plotType !== "heatmap" && plotType !== "volcano" ? (
@@ -3082,52 +3234,110 @@ export default function Home() {
                 {plotType === "heatmap" ? (
                   heatmap.length ? (
                     <div className="overflow-x-auto pb-3">
-                      <div
-                        className="mx-auto grid shrink-0 gap-1"
-                        style={{
-                          width: plotWidth,
-                          minHeight: plotHeight,
-                          gridTemplateColumns: `minmax(140px,1.4fr) repeat(${heatmap.length}, minmax(68px,1fr))`,
-                        }}
+                      <svg
+                        className="mx-auto block shrink-0"
+                        width={heatmapSvgWidth}
+                        height={heatmapSvgHeight}
+                        viewBox={`0 0 ${heatmapSvgWidth} ${heatmapSvgHeight}`}
+                        role="img"
+                        aria-label="Clustered correlation heatmap"
                       >
-                        <div />
-                        {activeHeatmapColumns.map((column) => (
-                          <div
-                            key={column}
-                            className="flex min-h-24 items-end justify-center pb-2 text-[11px] font-medium [writing-mode:vertical-rl]"
-                            style={{ fontSize: tickFontSize }}
-                          >
-                            {column}
-                          </div>
+                        <rect
+                          width={heatmapSvgWidth}
+                          height={heatmapSvgHeight}
+                          fill="#ffffff"
+                        />
+                        {heatmapDendrogramSegments.map((segment, index) => (
+                          <line
+                            key={`dendrogram-${index}`}
+                            x1={segment.x1}
+                            y1={segment.y1}
+                            x2={segment.x2}
+                            y2={segment.y2}
+                            stroke="#111827"
+                            strokeWidth={Math.max(1, axisLineWidth)}
+                            vectorEffect="non-scaling-stroke"
+                          />
                         ))}
-                        {heatmapRowOrder.map((rowIndex) => {
+                        {heatmapRowOrder.map((rowIndex, rowPosition) => {
                           const row = heatmap[rowIndex];
                           return (
-                            <div key={`row-${rowIndex}`} className="contents">
-                              <div
-                                className="flex items-center justify-end pr-3 text-xs font-medium"
-                                style={{ fontSize: tickFontSize }}
+                            <g key={`row-${rowIndex}`}>
+                              {row.map((value, columnIndex) => (
+                                <g
+                                  key={`${rowIndex}-${columnIndex}`}
+                                >
+                                  <rect
+                                    x={heatmapDendrogramWidth + columnIndex * heatmapCellSize}
+                                    y={heatmapMatrixTop + rowPosition * heatmapCellSize}
+                                    width={heatmapCellSize}
+                                    height={heatmapCellSize}
+                                    fill={correlationColor(value, heatmapPalette)}
+                                    stroke="#ffffff"
+                                    strokeWidth={0.8}
+                                    shapeRendering="crispEdges"
+                                  >
+                                    <title>{`${activeHeatmapColumns[rowIndex]} × ${activeHeatmapColumns[columnIndex]}: r = ${formatNumber(value)}`}</title>
+                                  </rect>
+                                  {showHeatmapValues ? (
+                                    <text
+                                      x={
+                                        heatmapDendrogramWidth +
+                                        (columnIndex + 0.5) * heatmapCellSize
+                                      }
+                                      y={
+                                        heatmapMatrixTop +
+                                        (rowPosition + 0.5) * heatmapCellSize
+                                      }
+                                      fill={contrastingText(
+                                        correlationColor(value, heatmapPalette),
+                                      )}
+                                      fontSize={Math.min(tickFontSize, heatmapCellSize * 0.27)}
+                                      fontWeight={650}
+                                      textAnchor="middle"
+                                      dominantBaseline="central"
+                                      pointerEvents="none"
+                                    >
+                                      {formatNumber(value, 2)}
+                                    </text>
+                                  ) : null}
+                                </g>
+                              ))}
+                              <text
+                                x={heatmapDendrogramWidth + heatmapMatrixSize + 10}
+                                y={
+                                  heatmapMatrixTop + (rowPosition + 0.5) * heatmapCellSize
+                                }
+                                fill="#111827"
+                                fontSize={tickFontSize}
+                                fontWeight={600}
+                                dominantBaseline="central"
                               >
                                 {activeHeatmapColumns[rowIndex]}
-                              </div>
-                              {row.map((value, columnIndex) => (
-                                <div
-                                  key={`${rowIndex}-${columnIndex}`}
-                                  className="flex aspect-square min-h-14 items-center justify-center rounded-md text-xs font-semibold shadow-sm"
-                                  style={{
-                                    background: correlationColor(value, heatmapPalette),
-                                    color: contrastingText(correlationColor(value, heatmapPalette)),
-                                    fontSize: tickFontSize,
-                                  }}
-                                  title={`r = ${formatNumber(value)}`}
-                                >
-                                  {formatNumber(value, 2)}
-                                </div>
-                              ))}
-                            </div>
+                              </text>
+                            </g>
                           );
                         })}
-                      </div>
+                        {activeHeatmapColumns.map((column, columnIndex) => {
+                          const x =
+                            heatmapDendrogramWidth + (columnIndex + 0.5) * heatmapCellSize;
+                          const y = heatmapMatrixTop + heatmapMatrixSize + 9;
+                          return (
+                            <text
+                              key={`column-${column}`}
+                              x={x}
+                              y={y}
+                              fill="#111827"
+                              fontSize={tickFontSize}
+                              fontWeight={600}
+                              textAnchor="start"
+                              transform={`rotate(90 ${x} ${y})`}
+                            >
+                              {column}
+                            </text>
+                          );
+                        })}
+                      </svg>
                       <div
                         className="mx-auto mt-4 flex max-w-md items-center gap-3 text-xs text-muted-foreground"
                         style={{ fontSize: tickFontSize }}
@@ -3234,6 +3444,12 @@ export default function Home() {
                                   : payload.direction === "Down"
                                     ? "#3f526d"
                                     : "#b9bdc5";
+                              const specificallyRequested = requestedVolcanoLabels.has(
+                                payload.label.trim().toLocaleLowerCase(),
+                              );
+                              const shouldShowLabel =
+                                specificallyRequested ||
+                                (showLabels && payload.direction !== "NS");
                               return (
                                 <g>
                                   <circle
@@ -3241,13 +3457,17 @@ export default function Home() {
                                     cy={Number(props.cy)}
                                     r={pointSize / 2}
                                     fill={color}
+                                    stroke={specificallyRequested ? "#111827" : "none"}
+                                    strokeWidth={specificallyRequested ? 1.5 : 0}
                                   />
                                   {showLabels && payload.direction !== "NS" ? (
+                                  {shouldShowLabel ? (
                                     <text
                                       x={Number(props.cx) + 5}
                                       y={Number(props.cy) - 5}
                                       fontSize={Math.max(9, tickFontSize - 2)}
                                       fill="#111827"
+                                      fontWeight={specificallyRequested ? 700 : 400}
                                     >
                                       {payload.label}
                                     </text>
