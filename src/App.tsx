@@ -2361,13 +2361,6 @@ export default function Home() {
                 ) : null}
                 {plotType === "volcano" ? (
                   <div className="grid gap-3 rounded-xl border border-primary/15 bg-primary/[0.025] p-3">
-                  <label className="flex items-center gap-2">
-                    <Checkbox
-                      checked={showLabels}
-                      onCheckedChange={(checked) => setShowLabels(Boolean(checked))}
-                    />{" "}
-                    Label significant features
-                  </label>
                     <label className="flex items-center gap-2">
                       <Checkbox
                         checked={showLabels}
@@ -3000,11 +2993,6 @@ export default function Home() {
                           }}
                         />
                       ) : null}
-                      <Legend
-                        verticalAlign="top"
-                        align="right"
-                        wrapperStyle={{ fontSize: legendFontSize }}
-                      />
                     </ComposedChart>
                   </ChartContainer>
                 ) : null}
@@ -3468,7 +3456,6 @@ export default function Home() {
                                     stroke={specificallyRequested ? "#111827" : "none"}
                                     strokeWidth={specificallyRequested ? 1.5 : 0}
                                   />
-                                  {showLabels && payload.direction !== "NS" ? (
                                   {shouldShowLabel ? (
                                     <text
                                       x={Number(props.cx) + 5}
@@ -3789,12 +3776,7 @@ export default function Home() {
                 reference datasets; method-specific limitations still apply.
               </p>
               <p>
-                Version 1.0.1 · Updated 18 September 2026 ·{" "}
-                <a className="font-medium text-primary underline" href="/validation.html">
-                  Methods and benchmark
-                </a>{" "}
-                ·{" "}
-                Version 1.0.2 · Updated 19 September 2026 ·{" "}
+                Version 1.0.3 · Updated 19 September 2026 ·{" "}
                 <a
                   className="font-medium text-primary underline"
                   href="https://cariacolab.com/contact/"
