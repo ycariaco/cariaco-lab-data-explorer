@@ -125,186 +125,198 @@ type GroupedSummary = GroupSummary & {
 
 const demoRows: DataRow[] = [
   {
-    sample_id: "B01",
-    donor: "D1",
-    sex: "Female",
-    treatment: "Control",
-    dose_uM: "0",
-    viability_percent: "98",
-    hCG_ng_mL: "14.2",
-    progesterone_ng_mL: "7.8",
+    sample_id: "P01",
+    species: "Adelie",
+    island: "Torgersen",
+    sex: "male",
+    bill_length_mm: "39.1",
+    bill_depth_mm: "18.7",
+    flipper_length_mm: "181",
+    body_mass_g: "3750",
   },
   {
-    sample_id: "B02",
-    donor: "D2",
-    sex: "Female",
-    treatment: "Control",
-    dose_uM: "0",
-    viability_percent: "96",
-    hCG_ng_mL: "13.7",
-    progesterone_ng_mL: "8.1",
+    sample_id: "P02",
+    species: "Adelie",
+    island: "Torgersen",
+    sex: "female",
+    bill_length_mm: "39.5",
+    bill_depth_mm: "17.4",
+    flipper_length_mm: "186",
+    body_mass_g: "3800",
   },
   {
-    sample_id: "B03",
-    donor: "D3",
-    sex: "Female",
-    treatment: "Control",
-    dose_uM: "0",
-    viability_percent: "101",
-    hCG_ng_mL: "15.1",
-    progesterone_ng_mL: "8.5",
+    sample_id: "P03",
+    species: "Adelie",
+    island: "Torgersen",
+    sex: "female",
+    bill_length_mm: "40.3",
+    bill_depth_mm: "18.0",
+    flipper_length_mm: "195",
+    body_mass_g: "3250",
   },
   {
-    sample_id: "B04",
-    donor: "D4",
-    sex: "Male",
-    treatment: "Control",
-    dose_uM: "0",
-    viability_percent: "97",
-    hCG_ng_mL: "14.6",
-    progesterone_ng_mL: "7.9",
+    sample_id: "P04",
+    species: "Adelie",
+    island: "Torgersen",
+    sex: "female",
+    bill_length_mm: "36.7",
+    bill_depth_mm: "19.3",
+    flipper_length_mm: "193",
+    body_mass_g: "3450",
   },
   {
-    sample_id: "B05",
-    donor: "D5",
-    sex: "Male",
-    treatment: "Control",
-    dose_uM: "0",
-    viability_percent: "99",
-    hCG_ng_mL: "14.0",
-    progesterone_ng_mL: "8.3",
+    sample_id: "P05",
+    species: "Adelie",
+    island: "Torgersen",
+    sex: "male",
+    bill_length_mm: "39.3",
+    bill_depth_mm: "20.6",
+    flipper_length_mm: "190",
+    body_mass_g: "3650",
   },
   {
-    sample_id: "B06",
-    donor: "D6",
-    sex: "Male",
-    treatment: "Control",
-    dose_uM: "0",
-    viability_percent: "95",
-    hCG_ng_mL: "13.5",
-    progesterone_ng_mL: "7.7",
+    sample_id: "P06",
+    species: "Adelie",
+    island: "Torgersen",
+    sex: "female",
+    bill_length_mm: "38.9",
+    bill_depth_mm: "17.8",
+    flipper_length_mm: "181",
+    body_mass_g: "3625",
   },
   {
-    sample_id: "B07",
-    donor: "D1",
-    sex: "Female",
-    treatment: "Low Cd",
-    dose_uM: "0.5",
-    viability_percent: "94",
-    hCG_ng_mL: "12.8",
-    progesterone_ng_mL: "7.2",
+    sample_id: "P07",
+    species: "Chinstrap",
+    island: "Dream",
+    sex: "female",
+    bill_length_mm: "46.5",
+    bill_depth_mm: "17.9",
+    flipper_length_mm: "192",
+    body_mass_g: "3500",
   },
   {
-    sample_id: "B08",
-    donor: "D2",
-    sex: "Female",
-    treatment: "Low Cd",
-    dose_uM: "0.5",
-    viability_percent: "92",
-    hCG_ng_mL: "12.2",
-    progesterone_ng_mL: "7.0",
+    sample_id: "P08",
+    species: "Chinstrap",
+    island: "Dream",
+    sex: "male",
+    bill_length_mm: "50.0",
+    bill_depth_mm: "19.5",
+    flipper_length_mm: "196",
+    body_mass_g: "3900",
   },
   {
-    sample_id: "B09",
-    donor: "D3",
-    sex: "Female",
-    treatment: "Low Cd",
-    dose_uM: "0.5",
-    viability_percent: "95",
-    hCG_ng_mL: "13.1",
-    progesterone_ng_mL: "7.5",
+    sample_id: "P09",
+    species: "Chinstrap",
+    island: "Dream",
+    sex: "male",
+    bill_length_mm: "51.3",
+    bill_depth_mm: "19.2",
+    flipper_length_mm: "193",
+    body_mass_g: "3650",
   },
   {
-    sample_id: "B10",
-    donor: "D4",
-    sex: "Male",
-    treatment: "Low Cd",
-    dose_uM: "0.5",
-    viability_percent: "93",
-    hCG_ng_mL: "11.9",
-    progesterone_ng_mL: "6.8",
+    sample_id: "P10",
+    species: "Chinstrap",
+    island: "Dream",
+    sex: "female",
+    bill_length_mm: "45.4",
+    bill_depth_mm: "18.7",
+    flipper_length_mm: "188",
+    body_mass_g: "3525",
   },
   {
-    sample_id: "B11",
-    donor: "D5",
-    sex: "Male",
-    treatment: "Low Cd",
-    dose_uM: "0.5",
-    viability_percent: "91",
-    hCG_ng_mL: "12.5",
-    progesterone_ng_mL: "7.1",
+    sample_id: "P11",
+    species: "Chinstrap",
+    island: "Dream",
+    sex: "male",
+    bill_length_mm: "52.7",
+    bill_depth_mm: "19.8",
+    flipper_length_mm: "197",
+    body_mass_g: "3725",
   },
   {
-    sample_id: "B12",
-    donor: "D6",
-    sex: "Male",
-    treatment: "Low Cd",
-    dose_uM: "0.5",
-    viability_percent: "96",
-    hCG_ng_mL: "12.7",
-    progesterone_ng_mL: "7.3",
+    sample_id: "P12",
+    species: "Chinstrap",
+    island: "Dream",
+    sex: "female",
+    bill_length_mm: "45.2",
+    bill_depth_mm: "17.8",
+    flipper_length_mm: "198",
+    body_mass_g: "3950",
   },
   {
-    sample_id: "B13",
-    donor: "D1",
-    sex: "Female",
-    treatment: "Metal mixture",
-    dose_uM: "1",
-    viability_percent: "90",
-    hCG_ng_mL: "10.6",
-    progesterone_ng_mL: "6.1",
+    sample_id: "P13",
+    species: "Gentoo",
+    island: "Biscoe",
+    sex: "female",
+    bill_length_mm: "46.1",
+    bill_depth_mm: "13.2",
+    flipper_length_mm: "211",
+    body_mass_g: "4500",
   },
   {
-    sample_id: "B14",
-    donor: "D2",
-    sex: "Female",
-    treatment: "Metal mixture",
-    dose_uM: "1",
-    viability_percent: "88",
-    hCG_ng_mL: "9.9",
-    progesterone_ng_mL: "5.8",
+    sample_id: "P14",
+    species: "Gentoo",
+    island: "Biscoe",
+    sex: "male",
+    bill_length_mm: "50.0",
+    bill_depth_mm: "16.3",
+    flipper_length_mm: "230",
+    body_mass_g: "5700",
   },
   {
-    sample_id: "B15",
-    donor: "D3",
-    sex: "Female",
-    treatment: "Metal mixture",
-    dose_uM: "1",
-    viability_percent: "91",
-    hCG_ng_mL: "10.8",
-    progesterone_ng_mL: "6.4",
+    sample_id: "P15",
+    species: "Gentoo",
+    island: "Biscoe",
+    sex: "female",
+    bill_length_mm: "48.7",
+    bill_depth_mm: "14.1",
+    flipper_length_mm: "210",
+    body_mass_g: "4450",
   },
   {
-    sample_id: "B16",
-    donor: "D4",
-    sex: "Male",
-    treatment: "Metal mixture",
-    dose_uM: "1",
-    viability_percent: "89",
-    hCG_ng_mL: "10.2",
-    progesterone_ng_mL: "6.0",
+    sample_id: "P16",
+    species: "Gentoo",
+    island: "Biscoe",
+    sex: "male",
+    bill_length_mm: "50.0",
+    bill_depth_mm: "15.2",
+    flipper_length_mm: "218",
+    body_mass_g: "5700",
   },
   {
-    sample_id: "B17",
-    donor: "D5",
-    sex: "Male",
-    treatment: "Metal mixture",
-    dose_uM: "1",
-    viability_percent: "87",
-    hCG_ng_mL: "9.7",
-    progesterone_ng_mL: "5.6",
+    sample_id: "P17",
+    species: "Gentoo",
+    island: "Biscoe",
+    sex: "male",
+    bill_length_mm: "47.6",
+    bill_depth_mm: "14.5",
+    flipper_length_mm: "215",
+    body_mass_g: "5400",
   },
   {
-    sample_id: "B18",
-    donor: "D6",
-    sex: "Male",
-    treatment: "Metal mixture",
-    dose_uM: "1",
-    viability_percent: "92",
-    hCG_ng_mL: "10.4",
-    progesterone_ng_mL: "6.2",
+    sample_id: "P18",
+    species: "Gentoo",
+    island: "Biscoe",
+    sex: "female",
+    bill_length_mm: "46.5",
+    bill_depth_mm: "13.5",
+    flipper_length_mm: "210",
+    body_mass_g: "4550",
   },
 ];
+
+const demoDatasetName = "Palmer Penguins example · Viridis palette";
+const demoSeriesColorOverrides: Record<string, string> = {
+  "columns:species\u0000Adelie": "#440154",
+  "columns:species\u0000Chinstrap": "#21918c",
+  "columns:species\u0000Gentoo": "#fde725",
+  "xy:species\u0000Adelie": "#440154",
+  "xy:species\u0000Chinstrap": "#21918c",
+  "xy:species\u0000Gentoo": "#fde725",
+  "grouped:species:sex\u0000female": "#440154",
+  "grouped:species:sex\u0000male": "#5ec962",
+};
 
 const chartConfig = {
   observation: { label: "Observation", color: "#111827" },
@@ -624,23 +636,23 @@ function hierarchicalHeatmapOrder(
 
 export default function Home() {
   const [rows, setRows] = useState<DataRow[]>(demoRows);
-  const [fileName, setFileName] = useState("Example trophoblast dataset");
+  const [fileName, setFileName] = useState(demoDatasetName);
   const [dataText, setDataText] = useState(() => rowsToTabDelimited(demoRows));
   const [showDataEditor, setShowDataEditor] = useState(false);
   const [plotType, setPlotType] = useState<PlotType>("columns");
-  const [outcome, setOutcome] = useState("hCG_ng_mL");
-  const [group, setGroup] = useState("treatment");
+  const [outcome, setOutcome] = useState("body_mass_g");
+  const [group, setGroup] = useState("species");
   const [factor2, setFactor2] = useState("__none__");
   const [subject, setSubject] = useState("__none__");
-  const [xVariable, setXVariable] = useState("dose_uM");
-  const [effectVariable, setEffectVariable] = useState("dose_uM");
+  const [xVariable, setXVariable] = useState("flipper_length_mm");
+  const [effectVariable, setEffectVariable] = useState("bill_length_mm");
   const [pVariable, setPVariable] = useState("");
   const [labelVariable, setLabelVariable] = useState("sample_id");
   const [heatmapColumns, setHeatmapColumns] = useState<string[]>([
-    "dose_uM",
-    "viability_percent",
-    "hCG_ng_mL",
-    "progesterone_ng_mL",
+    "bill_length_mm",
+    "bill_depth_mm",
+    "flipper_length_mm",
+    "body_mass_g",
   ]);
   const [testChoice, setTestChoice] = useState<TestChoice>("auto");
   const [outlierMethod, setOutlierMethod] = useState<OutlierMethod>("mad");
@@ -650,9 +662,10 @@ export default function Home() {
   const [yLabel, setYLabel] = useState("");
   const [primaryColor, setPrimaryColor] = useState("#f92080");
   const [secondaryColor, setSecondaryColor] = useState("#111827");
-  const [seriesColorOverrides, setSeriesColorOverrides] = useState<Record<string, string>>({});
-  const [pointColorMode, setPointColorMode] = useState<PointColorMode>("single");
-  const [heatmapPalette, setHeatmapPalette] = useState<HeatmapPalette>("cariaco");
+  const [seriesColorOverrides, setSeriesColorOverrides] =
+    useState<Record<string, string>>(demoSeriesColorOverrides);
+  const [pointColorMode, setPointColorMode] = useState<PointColorMode>("series");
+  const [heatmapPalette, setHeatmapPalette] = useState<HeatmapPalette>("viridis");
   const [heatmapLinkage, setHeatmapLinkage] = useState<HeatmapLinkage>("none");
   const [heatmapDistance, setHeatmapDistance] = useState<HeatmapDistance>("correlation");
   const [pointSize, setPointSize] = useState(7);
@@ -1536,12 +1549,15 @@ export default function Home() {
   }
 
   function loadDemo() {
-    updateDataset(demoRows, "Example trophoblast dataset");
-    setOutcome("hCG_ng_mL");
-    setXVariable("dose_uM");
-    setGroup("treatment");
+    updateDataset(demoRows, demoDatasetName);
+    setOutcome("body_mass_g");
+    setXVariable("flipper_length_mm");
+    setGroup("species");
     setLabelVariable("sample_id");
-    setHeatmapColumns(["dose_uM", "viability_percent", "hCG_ng_mL", "progesterone_ng_mL"]);
+    setHeatmapColumns(["bill_length_mm", "bill_depth_mm", "flipper_length_mm", "body_mass_g"]);
+    setHeatmapPalette("viridis");
+    setPointColorMode("series");
+    setSeriesColorOverrides(demoSeriesColorOverrides);
     if (fileInput.current) fileInput.current.value = "";
   }
 
@@ -1706,6 +1722,11 @@ export default function Home() {
               <CardDescription className="truncate" title={fileName}>
                 {fileName}
               </CardDescription>
+              {fileName === demoDatasetName ? (
+                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  Curated from the Palmer Penguins dataset (Gorman et al., 2014).
+                </p>
+              ) : null}
             </CardHeader>
             <CardContent className="space-y-3">
               <input
@@ -1723,7 +1744,7 @@ export default function Home() {
                 <Upload aria-hidden="true" /> Upload CSV
               </Button>
               <Button className="w-full justify-start" variant="outline" onClick={loadDemo}>
-                <RefreshCcw aria-hidden="true" /> Load example
+                <RefreshCcw aria-hidden="true" /> Load penguin example
               </Button>
               <Button
                 className="w-full justify-start"
