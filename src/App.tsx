@@ -2073,21 +2073,6 @@ export default function Home() {
                       ))}
                     </NativeSelect>
                   </label>
-                  <label className="grid gap-1.5 text-xs font-medium">
-                    Molecules to label
-                    <Textarea
-                      className="min-h-20 resize-y bg-white text-xs"
-                      placeholder={"CYP19A1, HSD3B1, SOD1\nSeparate names with commas or new lines"}
-                      value={volcanoLabelList}
-                      onChange={(event) => setVolcanoLabelList(event.target.value)}
-                    />
-                    <span className="font-normal leading-relaxed text-muted-foreground">
-                      Case-insensitive exact matches from the selected feature-label column.
-                      {requestedVolcanoLabels.size
-                        ? ` ${matchedVolcanoLabelCount} of ${requestedVolcanoLabels.size} requested labels found.`
-                        : ""}
-                    </span>
-                  </label>
                 </>
               ) : null}
               {plotType === "heatmap" ? (
@@ -2375,14 +2360,37 @@ export default function Home() {
                   </label>
                 ) : null}
                 {plotType === "volcano" ? (
+                  <div className="grid gap-3 rounded-xl border border-primary/15 bg-primary/[0.025] p-3">
                   <label className="flex items-center gap-2">
                     <Checkbox
                       checked={showLabels}
                       onCheckedChange={(checked) => setShowLabels(Boolean(checked))}
                     />{" "}
                     Label significant features
-                    Label all significant features
                   </label>
+                    <label className="flex items-center gap-2">
+                      <Checkbox
+                        checked={showLabels}
+                        onCheckedChange={(checked) => setShowLabels(Boolean(checked))}
+                      />{" "}
+                      Label all significant features
+                    </label>
+                    <label className="grid gap-1.5 text-xs font-medium">
+                      Label specific features or molecules
+                      <Textarea
+                        className="min-h-24 resize-y bg-white text-xs"
+                        placeholder={"CYP19A1, HSD3B1, SOD1\nSeparate names with commas or new lines"}
+                        value={volcanoLabelList}
+                        onChange={(event) => setVolcanoLabelList(event.target.value)}
+                      />
+                      <span className="font-normal leading-relaxed text-muted-foreground">
+                        Uses case-insensitive exact matches from the selected feature-label column.
+                        {requestedVolcanoLabels.size
+                          ? ` ${matchedVolcanoLabelCount} of ${requestedVolcanoLabels.size} requested labels found.`
+                          : ""}
+                      </span>
+                    </label>
+                  </div>
                 ) : null}
                 {plotType !== "heatmap" && plotType !== "volcano" ? (
                   <label className="flex items-center gap-2">
@@ -3786,6 +3794,7 @@ export default function Home() {
                   Methods and benchmark
                 </a>{" "}
                 ·{" "}
+                Version 1.0.2 · Updated 19 September 2026 ·{" "}
                 <a
                   className="font-medium text-primary underline"
                   href="https://cariacolab.com/contact/"
