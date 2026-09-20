@@ -357,6 +357,22 @@ function parseDelimitedText(text: string): DataRow[] {
   if (!clean) return [];
   const firstLine = clean.split(/\r?\n/, 1)[0];
   const delimiters = [",", "\t", ";"];
+  const hasExplicitDelimiter = delimiters.some((candidate) => firstLine.includes(candidate));
+  if (!hasExplicitDelimiter && /\s+/.test(firstLine.trim())) {
+    const records = clean
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => line.split(/\s+/));
+    const headers = records[0]?.map((header) => header.trim()) ?? [];
+    if (headers.length < 2) return [];
+    return records.slice(1).flatMap((record) => {
+      if (!record.some(Boolean)) return [];
+      return [
+        Object.fromEntries(headers.map((header, index) => [header, record[index]?.trim() ?? ""])),
+      ];
+    });
+  }
   const delimiter = delimiters.reduce((best, candidate) =>
     firstLine.split(candidate).length > firstLine.split(best).length ? candidate : best,
   );
@@ -829,7 +845,7 @@ function DistributionPlot({
         const halfWidth = Math.min(46, slotWidth * 0.34);
         const densityValues = Array.from(
           { length: 56 },
-          (_, index) => minimum + ((maximum - minimum) * index) / 55,
+          (_, index) => min + ((max - min) * index) / 55,
         );
         const density = gaussianKernelDensity(group.values, densityValues);
         const densityMaximum = Math.max(...density.map((entry) => entry.density), 1e-12);
@@ -1173,6 +1189,10 @@ function SetIntersectionPlot({
     });
     return {
       setNames,
+      setSizes: setNames.map((setName) => ({
+        name: setName,
+        count: [...memberships.values()].filter((sets) => sets.has(setName)).length,
+      })),
       intersections: [...intersections.entries()]
         .map(([key, items]) => ({ sets: key.split("\u0000"), items, count: items.length }))
         .sort((a, b) => b.count - a.count || a.sets.length - b.sets.length),
@@ -1194,28 +1214,28 @@ function SetIntersectionPlot({
           sets.every((setName) => intersection.sets.includes(setName)),
       )?.count ?? 0;
     const [a, b, c] = model.setNames;
-    const radius = Math.min(width * 0.2, height * 0.26, 120);
+    const radius = Math.min(width * 0.18, height * 0.22, 102);
     const centerY = height * 0.5;
     return (
       <svg width={width} height={height} role="img" aria-label="Venn diagram">
         <rect width={width} height={height} fill="#ffffff" />
         {model.setNames.length === 2 ? (
           <>
-            <circle cx={width * 0.42} cy={centerY} r={radius} fill="#440154" fillOpacity={0.28} stroke="#440154" strokeWidth={2} />
-            <circle cx={width * 0.58} cy={centerY} r={radius} fill="#22a884" fillOpacity={0.28} stroke="#16836b" strokeWidth={2} />
-            <text x={width * 0.34} y={centerY - radius - 14} textAnchor="middle" fontSize={tickFontSize + 1} fontWeight={700}>{a}</text>
-            <text x={width * 0.66} y={centerY - radius - 14} textAnchor="middle" fontSize={tickFontSize + 1} fontWeight={700}>{b}</text>
+            <circle cx={width * 0.42} cy={centerY} r={radius} fill="#440154" fillOpacity={0.28} />
+            <circle cx={width * 0.58} cy={centerY} r={radius} fill="#22a884" fillOpacity={0.28} />
+            <text x={width * 0.34} y={centerY - radius - 18} textAnchor="middle" fontSize={tickFontSize + 1} fontWeight={700}>{a}</text>
+            <text x={width * 0.66} y={centerY - radius - 18} textAnchor="middle" fontSize={tickFontSize + 1} fontWeight={700}>{b}</text>
             <text x={width * 0.35} y={centerY} textAnchor="middle" fontSize={tickFontSize + 4} fontWeight={700}>{countFor(a)}</text>
             <text x={width * 0.5} y={centerY} textAnchor="middle" fontSize={tickFontSize + 4} fontWeight={700}>{countFor(a, b)}</text>
             <text x={width * 0.65} y={centerY} textAnchor="middle" fontSize={tickFontSize + 4} fontWeight={700}>{countFor(b)}</text>
           </>
         ) : (
           <>
-            <circle cx={width * 0.42} cy={height * 0.43} r={radius} fill="#440154" fillOpacity={0.25} stroke="#440154" strokeWidth={2} />
-            <circle cx={width * 0.58} cy={height * 0.43} r={radius} fill="#21918c" fillOpacity={0.25} stroke="#16836b" strokeWidth={2} />
-            <circle cx={width * 0.5} cy={height * 0.61} r={radius} fill="#fde725" fillOpacity={0.25} stroke="#b9a800" strokeWidth={2} />
-            <text x={width * 0.32} y={height * 0.18} textAnchor="middle" fontSize={tickFontSize + 1} fontWeight={700}>{a}</text>
-            <text x={width * 0.68} y={height * 0.18} textAnchor="middle" fontSize={tickFontSize + 1} fontWeight={700}>{b}</text>
+            <circle cx={width * 0.42} cy={height * 0.43} r={radius} fill="#440154" fillOpacity={0.28} />
+            <circle cx={width * 0.58} cy={height * 0.43} r={radius} fill="#21918c" fillOpacity={0.28} />
+            <circle cx={width * 0.5} cy={height * 0.61} r={radius} fill="#fde725" fillOpacity={0.28} />
+            <text x={width * 0.32} y={height * 0.16} textAnchor="middle" fontSize={tickFontSize + 1} fontWeight={700}>{a}</text>
+            <text x={width * 0.68} y={height * 0.16} textAnchor="middle" fontSize={tickFontSize + 1} fontWeight={700}>{b}</text>
             <text x={width * 0.5} y={height * 0.91} textAnchor="middle" fontSize={tickFontSize + 1} fontWeight={700}>{c}</text>
             <text x={width * 0.34} y={height * 0.4} textAnchor="middle" fontSize={tickFontSize + 2} fontWeight={700}>{countFor(a)}</text>
             <text x={width * 0.66} y={height * 0.4} textAnchor="middle" fontSize={tickFontSize + 2} fontWeight={700}>{countFor(b)}</text>
@@ -1232,27 +1252,107 @@ function SetIntersectionPlot({
   }
 
   const intersections = model.intersections.slice(0, 16);
-  const left = 150;
+  const setBarLeft = 22;
+  const setBarRight = 188;
+  const matrixLeft = 300;
   const columnWidth = 48;
-  const upsetWidth = Math.max(width, left + intersections.length * columnWidth + 28);
+  const upsetWidth = Math.max(width, matrixLeft + intersections.length * columnWidth + 28);
   const barTop = 28;
   const barBottom = Math.min(210, height * 0.47);
   const matrixTop = barBottom + 44;
-  const rowHeight = 27;
-  const maximum = Math.max(...intersections.map((entry) => entry.count), 1);
-  const barScale = linearScale(0, maximum, barBottom, barTop);
+  const rowHeight = 38;
+  const chartHeight = Math.max(height, matrixTop + model.setNames.length * rowHeight + 86);
+  const intersectionMaximum = Math.max(...intersections.map((entry) => entry.count), 1);
+  const setMaximum = Math.max(...model.setSizes.map((entry) => entry.count), 1);
+  const intersectionBarScale = linearScale(0, intersectionMaximum, barBottom, barTop);
+  const setBarScale = linearScale(0, setMaximum, 0, setBarRight - setBarLeft);
+  const setTicks = Array.from(new Set([0, Math.round(setMaximum / 2), setMaximum]));
+  const intersectionTicks = Array.from(
+    new Set(
+      Array.from({ length: 4 }, (_, index) =>
+        Math.round((intersectionMaximum * index) / 3),
+      ),
+    ),
+  );
   return (
     <div className="overflow-x-auto">
-      <svg width={upsetWidth} height={Math.max(height, matrixTop + model.setNames.length * rowHeight + 48)} role="img" aria-label="UpSet intersection plot">
-        <rect width={upsetWidth} height="100%" fill="#ffffff" />
-        <text x={20} y={18} fontSize={tickFontSize} fontWeight={700} fill="#111827">Intersection size</text>
+      <svg
+        width={upsetWidth}
+        height={chartHeight}
+        role="img"
+        aria-label="UpSet intersection plot"
+      >
+        <rect width={upsetWidth} height={chartHeight} fill="#ffffff" />
+        <text
+          transform={`translate(${matrixLeft - 52} ${(barTop + barBottom) / 2}) rotate(-90)`}
+          textAnchor="middle"
+          fontSize={tickFontSize + 1}
+          fontWeight={700}
+          fill="#111827"
+        >
+          Items per intersection
+        </text>
+        {intersectionTicks.map((tick) => {
+          const y = intersectionBarScale(tick);
+          return (
+            <g key={`intersection-tick-${tick}`}>
+              <line
+                x1={matrixLeft - 5}
+                x2={upsetWidth - 18}
+                y1={y}
+                y2={y}
+                stroke={tick === 0 ? "#111827" : "#e5e7eb"}
+                strokeDasharray={tick === 0 ? undefined : "3 3"}
+              />
+              <text
+                x={matrixLeft - 10}
+                y={y}
+                textAnchor="end"
+                dominantBaseline="central"
+                fontSize={tickFontSize - 1}
+                fill="#374151"
+              >
+                {tick}
+              </text>
+            </g>
+          );
+        })}
+        {model.setNames.map((setName, index) =>
+          index % 2 === 0 ? (
+            <rect
+              key={`set-band-${setName}`}
+              x={setBarLeft - 8}
+              y={matrixTop + index * rowHeight - rowHeight / 2}
+              width={upsetWidth - setBarLeft - 10}
+              height={rowHeight}
+              fill="#f7f7f8"
+            />
+          ) : null,
+        )}
         {intersections.map((intersection, index) => {
-          const x = left + index * columnWidth + columnWidth / 2;
+          const x = matrixLeft + index * columnWidth + columnWidth / 2;
           const activeRows = model.setNames.flatMap((setName, rowIndex) => intersection.sets.includes(setName) ? [rowIndex] : []);
           return (
             <g key={intersection.sets.join("+")}>
-              <rect x={x - 14} y={barScale(intersection.count)} width={28} height={barBottom - barScale(intersection.count)} rx={3} fill="#f92080" fillOpacity={0.84} />
-              <text x={x} y={barScale(intersection.count) - 6} textAnchor="middle" fontSize={tickFontSize - 1} fontWeight={700}>{intersection.count}</text>
+              <rect
+                x={x - 14}
+                y={intersectionBarScale(intersection.count)}
+                width={28}
+                height={barBottom - intersectionBarScale(intersection.count)}
+                rx={2}
+                fill="#9333d4"
+                fillOpacity={0.92}
+              />
+              <text
+                x={x}
+                y={intersectionBarScale(intersection.count) - 6}
+                textAnchor="middle"
+                fontSize={tickFontSize - 1}
+                fontWeight={700}
+                fill="#7e22ce"
+              >
+                {intersection.count}
+              </text>
               {activeRows.length > 1 ? <line x1={x} x2={x} y1={matrixTop + Math.min(...activeRows) * rowHeight} y2={matrixTop + Math.max(...activeRows) * rowHeight} stroke="#111827" strokeWidth={2} /> : null}
               {model.setNames.map((setName, rowIndex) => (
                 <circle key={setName} cx={x} cy={matrixTop + rowIndex * rowHeight} r={intersection.sets.includes(setName) ? 5.5 : 3.5} fill={intersection.sets.includes(setName) ? "#111827" : "#d1d5db"} />
@@ -1261,14 +1361,82 @@ function SetIntersectionPlot({
             </g>
           );
         })}
-        {model.setNames.map((setName, index) => (
-          <g key={setName}>
-            <text x={left - 14} y={matrixTop + index * rowHeight} textAnchor="end" dominantBaseline="central" fontSize={tickFontSize} fontWeight={600}>{setName}</text>
-            <line x1={left} x2={upsetWidth - 18} y1={matrixTop + index * rowHeight + rowHeight / 2} y2={matrixTop + index * rowHeight + rowHeight / 2} stroke="#f3f4f6" />
-          </g>
-        ))}
-        <line x1={left} x2={upsetWidth - 18} y1={barBottom} y2={barBottom} stroke="#111827" />
-        <text x={upsetWidth / 2} y={matrixTop + model.setNames.length * rowHeight + 30} textAnchor="middle" fontSize={tickFontSize} fill="#6b7280">Top {intersections.length} exact intersections · {model.itemCount} unique items</text>
+        {model.setSizes.map((setSize, index) => {
+          const y = matrixTop + index * rowHeight;
+          const barWidth = setBarScale(setSize.count);
+          return (
+            <g key={setSize.name}>
+              <rect
+                x={setBarRight - barWidth}
+                y={y - 11}
+                width={barWidth}
+                height={22}
+                rx={2}
+                fill="#a3e635"
+                fillOpacity={0.9}
+              />
+              <text
+                x={barWidth > 38 ? setBarRight - barWidth / 2 : setBarRight - barWidth - 6}
+                y={y}
+                textAnchor={barWidth > 38 ? "middle" : "end"}
+                dominantBaseline="central"
+                fontSize={tickFontSize - 1}
+                fontWeight={700}
+                fill="#111827"
+              >
+                {setSize.count}
+              </text>
+              <text
+                x={matrixLeft - 16}
+                y={y}
+                textAnchor="end"
+                dominantBaseline="central"
+                fontSize={tickFontSize}
+                fontWeight={600}
+              >
+                {setSize.name}
+              </text>
+            </g>
+          );
+        })}
+        <line x1={matrixLeft - 5} x2={upsetWidth - 18} y1={barBottom} y2={barBottom} stroke="#111827" />
+        <line x1={setBarLeft} x2={setBarRight} y1={matrixTop + model.setNames.length * rowHeight - 8} y2={matrixTop + model.setNames.length * rowHeight - 8} stroke="#111827" />
+        {setTicks.map((tick) => {
+          const x = setBarRight - setBarScale(tick);
+          const y = matrixTop + model.setNames.length * rowHeight - 8;
+          return (
+            <g key={`set-tick-${tick}`}>
+              <line x1={x} x2={x} y1={y} y2={y + 5} stroke="#111827" />
+              <text
+                x={x}
+                y={y + 16}
+                textAnchor="middle"
+                fontSize={tickFontSize - 2}
+                fill="#374151"
+              >
+                {tick}
+              </text>
+            </g>
+          );
+        })}
+        <text
+          x={(setBarLeft + setBarRight) / 2}
+          y={matrixTop + model.setNames.length * rowHeight + 30}
+          textAnchor="middle"
+          fontSize={tickFontSize}
+          fontWeight={700}
+        >
+          Items per set
+        </text>
+        <text
+          x={(matrixLeft + upsetWidth - 18) / 2}
+          y={matrixTop + model.setNames.length * rowHeight + 54}
+          textAnchor="middle"
+          fontSize={tickFontSize}
+          fill="#6b7280"
+        >
+          Top {intersections.length} exact intersections · {model.itemCount} unique items
+        </text>
       </svg>
     </div>
   );
@@ -1308,6 +1476,16 @@ function DoseResponsePlot({
     <div>
       <svg width={width} height={height} role="img" aria-label="Four-parameter dose response curve">
         <rect width={width} height={height} fill="#ffffff" />
+        <defs>
+          <clipPath id="dose-response-plot-area">
+            <rect
+              x={margin.left}
+              y={margin.top}
+              width={width - margin.left - margin.right}
+              height={height - margin.top - margin.bottom}
+            />
+          </clipPath>
+        </defs>
         {yTicks.map((tick) => (
           <g key={`y-${tick}`}>
             <line x1={margin.left} x2={width - margin.right} y1={y(tick)} y2={y(tick)} stroke="#e5e7eb" strokeDasharray="3 3" />
@@ -1317,24 +1495,42 @@ function DoseResponsePlot({
         {xTicks.map((tick) => (
           <text key={`x-${tick}`} x={x(tick)} y={height - margin.bottom + 24} textAnchor="middle" fontSize={tickFontSize}>{formatNumber(tick)}</text>
         ))}
-        {series.map((entry) => {
-          const curve = entry.fit
-            ? Array.from({ length: 100 }, (_, index) => {
-                const value = xMin + ((xMax - xMin) * index) / 99;
-                return `${x(value)},${y(entry.fit?.predict(value) ?? Number.NaN)}`;
-              })
-            : [];
-          return (
-            <g key={entry.name}>
-              {curve.length ? <polyline points={curve.join(" ")} fill="none" stroke={entry.color} strokeWidth={2.4} /> : null}
-              {entry.points.map((point, index) => (
-                <circle key={index} cx={x(point.x)} cy={y(point.y)} r={pointSize / 2} fill={entry.color} fillOpacity={pointOpacity / 100} stroke="#ffffff" strokeWidth={0.8}>
-                  <title>{`${entry.name}: ${formatNumber(point.x)}, ${formatNumber(point.y)}`}</title>
-                </circle>
-              ))}
-            </g>
-          );
-        })}
+        <g clipPath="url(#dose-response-plot-area)">
+          {series.map((entry) => {
+            const curve = entry.fit
+              ? Array.from({ length: 100 }, (_, index) => {
+                  const value = xMin + ((xMax - xMin) * index) / 99;
+                  return `${x(value)},${y(entry.fit?.predict(value) ?? Number.NaN)}`;
+                })
+              : [];
+            return (
+              <g key={entry.name}>
+                {curve.length ? (
+                  <polyline
+                    points={curve.join(" ")}
+                    fill="none"
+                    stroke={entry.color}
+                    strokeWidth={2.4}
+                  />
+                ) : null}
+                {entry.points.map((point, index) => (
+                  <circle
+                    key={index}
+                    cx={x(point.x)}
+                    cy={y(point.y)}
+                    r={pointSize / 2}
+                    fill={entry.color}
+                    fillOpacity={pointOpacity / 100}
+                    stroke="#ffffff"
+                    strokeWidth={0.8}
+                  >
+                    <title>{`${entry.name}: ${formatNumber(point.x)}, ${formatNumber(point.y)}`}</title>
+                  </circle>
+                ))}
+              </g>
+            );
+          })}
+        </g>
         <line x1={margin.left} x2={margin.left} y1={margin.top} y2={height - margin.bottom} stroke="#111827" />
         <line x1={margin.left} x2={width - margin.right} y1={height - margin.bottom} y2={height - margin.bottom} stroke="#111827" />
         <text x={(margin.left + width - margin.right) / 2} y={height - 18} textAnchor="middle" fontSize={axisTitleFontSize}>{xLabel}</text>
@@ -1379,10 +1575,59 @@ function PcaPlot({
   const [yMin, yMax] = chartExtent(result.points.map((point) => point.pc2), 0.12);
   const x = linearScale(xMin, xMax, margin.left, width - margin.right);
   const y = linearScale(yMin, yMax, height - margin.bottom, margin.top);
+  const xTicks = Array.from(
+    { length: 6 },
+    (_, index) => xMin + ((xMax - xMin) * index) / 5,
+  );
+  const yTicks = Array.from(
+    { length: 6 },
+    (_, index) => yMin + ((yMax - yMin) * index) / 5,
+  );
   return (
     <div>
       <svg width={width} height={height} role="img" aria-label="PCA score plot">
         <rect width={width} height={height} fill="#ffffff" />
+        {xTicks.map((tick) => (
+          <g key={`pca-x-${tick}`}>
+            <line
+              x1={x(tick)}
+              x2={x(tick)}
+              y1={height - margin.bottom}
+              y2={height - margin.bottom + 5}
+              stroke="#111827"
+            />
+            <text
+              x={x(tick)}
+              y={height - margin.bottom + 22}
+              textAnchor="middle"
+              fontSize={tickFontSize}
+              fill="#374151"
+            >
+              {formatNumber(tick, 2)}
+            </text>
+          </g>
+        ))}
+        {yTicks.map((tick) => (
+          <g key={`pca-y-${tick}`}>
+            <line
+              x1={margin.left - 5}
+              x2={margin.left}
+              y1={y(tick)}
+              y2={y(tick)}
+              stroke="#111827"
+            />
+            <text
+              x={margin.left - 10}
+              y={y(tick)}
+              textAnchor="end"
+              dominantBaseline="central"
+              fontSize={tickFontSize}
+              fill="#374151"
+            >
+              {formatNumber(tick, 2)}
+            </text>
+          </g>
+        ))}
         <line x1={margin.left} x2={width - margin.right} y1={y(0)} y2={y(0)} stroke="#d1d5db" strokeDasharray="4 4" />
         <line x1={x(0)} x2={x(0)} y1={margin.top} y2={height - margin.bottom} stroke="#d1d5db" strokeDasharray="4 4" />
         {result.points.map((point, index) => (
@@ -1410,14 +1655,26 @@ function ComparisonOverlay({
   groups,
   width,
   fontSize,
+  showNonSignificant,
 }: {
   comparisons: PairwiseComparison[];
   groups: string[];
   width: number;
   fontSize: number;
+  showNonSignificant: boolean;
 }) {
   const visible = comparisons
-    .filter((comparison) => groups.includes(comparison.first) && groups.includes(comparison.second))
+    .filter(
+      (comparison) =>
+        groups.includes(comparison.first) &&
+        groups.includes(comparison.second) &&
+        (showNonSignificant || comparison.adjustedP < 0.05),
+    )
+    .sort(
+      (first, second) =>
+        Math.abs(groups.indexOf(first.second) - groups.indexOf(first.first)) -
+        Math.abs(groups.indexOf(second.second) - groups.indexOf(second.first)),
+    )
     .slice(0, 4);
   if (!visible.length || groups.length < 2) return null;
   const left = 96;
@@ -1425,15 +1682,150 @@ function ComparisonOverlay({
   const slot = (width - left - right) / groups.length;
   const center = (name: string) => left + (groups.indexOf(name) + 0.5) * slot;
   return (
-    <svg className="pointer-events-none absolute inset-x-0 top-0" width={width} height={86} aria-hidden="true">
+    <svg className="pointer-events-none absolute inset-x-0 top-0" width={width} height={88} aria-hidden="true">
       {visible.map((comparison, index) => {
         const x1 = center(comparison.first);
         const x2 = center(comparison.second);
-        const y = 12 + index * 17;
+        const y = 18 + index * 18;
+        const label = significanceLabel(comparison.adjustedP);
         return (
           <g key={comparisonKey(comparison)}>
-            <path d={`M ${x1} ${y + 6} V ${y} H ${x2} V ${y + 6}`} fill="none" stroke="#111827" strokeWidth={1} />
-            <text x={(x1 + x2) / 2} y={y - 2} textAnchor="middle" fontSize={Math.max(9, fontSize - 1)} fontWeight={700} fill="#111827">{significanceLabel(comparison.adjustedP)}</text>
+            <path
+              d={`M ${x1} ${y + 5} V ${y} H ${x2} V ${y + 5}`}
+              fill="none"
+              stroke="#111827"
+              strokeWidth={1.15}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <rect
+              x={(x1 + x2) / 2 - Math.max(12, label.length * 4.3)}
+              y={y - 10}
+              width={Math.max(24, label.length * 8.6)}
+              height={14}
+              rx={3}
+              fill="#ffffff"
+            />
+            <text
+              x={(x1 + x2) / 2}
+              y={y - 1}
+              textAnchor="middle"
+              fontSize={Math.max(9, fontSize - 1)}
+              fontWeight={700}
+              fill="#111827"
+            >
+              {label}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function GroupedComparisonOverlay({
+  comparisons,
+  groups,
+  series,
+  groupVariable,
+  seriesVariable,
+  width,
+  fontSize,
+  showNonSignificant,
+}: {
+  comparisons: PairwiseComparison[];
+  groups: string[];
+  series: string[];
+  groupVariable: string;
+  seriesVariable: string;
+  width: number;
+  fontSize: number;
+  showNonSignificant: boolean;
+}) {
+  const left = 96;
+  const right = 24;
+  const categoryWidth = (width - left - right) / Math.max(1, groups.length);
+  const seriesSpacing = Math.min(34, 86 / Math.max(1, series.length));
+  const categoryCenter = (name: string) =>
+    left + (groups.indexOf(name) + 0.5) * categoryWidth;
+  const seriesOffset = (name: string) =>
+    (series.indexOf(name) - (series.length - 1) / 2) * seriesSpacing;
+
+  const positioned = comparisons.flatMap((comparison) => {
+    if (!showNonSignificant && comparison.adjustedP >= 0.05) return [];
+    const context = comparison.context ?? "";
+    if (context.startsWith(`${groupVariable}: `)) {
+      const groupName = context.slice(groupVariable.length + 2);
+      if (
+        !groups.includes(groupName) ||
+        !series.includes(comparison.first) ||
+        !series.includes(comparison.second)
+      ) return [];
+      return [
+        {
+          comparison,
+          x1: categoryCenter(groupName) + seriesOffset(comparison.first),
+          x2: categoryCenter(groupName) + seriesOffset(comparison.second),
+        },
+      ];
+    }
+    if (context.startsWith(`${seriesVariable}: `)) {
+      const seriesName = context.slice(seriesVariable.length + 2);
+      if (
+        !series.includes(seriesName) ||
+        !groups.includes(comparison.first) ||
+        !groups.includes(comparison.second)
+      ) return [];
+      const offset = seriesOffset(seriesName);
+      return [
+        {
+          comparison,
+          x1: categoryCenter(comparison.first) + offset,
+          x2: categoryCenter(comparison.second) + offset,
+        },
+      ];
+    }
+    return [];
+  });
+
+  const visible = positioned
+    .sort((first, second) => Math.abs(first.x2 - first.x1) - Math.abs(second.x2 - second.x1))
+    .slice(0, 5);
+  if (!visible.length) return null;
+
+  return (
+    <svg className="pointer-events-none absolute inset-x-0 top-0" width={width} height={96} aria-hidden="true">
+      {visible.map(({ comparison, x1, x2 }, index) => {
+        const y = 17 + index * 16;
+        const label = significanceLabel(comparison.adjustedP);
+        return (
+          <g key={`${comparisonKey(comparison)}-${index}`}>
+            <path
+              d={`M ${x1} ${y + 4} V ${y} H ${x2} V ${y + 4}`}
+              fill="none"
+              stroke="#111827"
+              strokeWidth={1.05}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <rect
+              x={(x1 + x2) / 2 - Math.max(11, label.length * 4)}
+              y={y - 9}
+              width={Math.max(22, label.length * 8)}
+              height={13}
+              rx={3}
+              fill="#ffffff"
+            />
+            <text
+              x={(x1 + x2) / 2}
+              y={y - 1}
+              textAnchor="middle"
+              fontSize={Math.max(8, fontSize - 2)}
+              fontWeight={700}
+              fill="#111827"
+            >
+              {label}
+            </text>
           </g>
         );
       })}
@@ -1505,6 +1897,7 @@ export default function Home() {
   const [showPoints, setShowPoints] = useState(true);
   const [showErrorBars, setShowErrorBars] = useState(true);
   const [showComparisonAnnotations, setShowComparisonAnnotations] = useState(true);
+  const [showNonSignificantAnnotations, setShowNonSignificantAnnotations] = useState(false);
   const [volcanoLabelList, setVolcanoLabelList] = useState("");
   const [postHocEnabled, setPostHocEnabled] = useState(true);
   const [postHocAdjustment, setPostHocAdjustment] = useState<PostHocAdjustment>("holm");
@@ -2292,6 +2685,17 @@ export default function Home() {
     [volcanoPoints],
   );
 
+  const volcanoXDomain = useMemo<[number, number]>(() => {
+    if (!volcanoPoints.length) return [-1, 1];
+    return [...chartExtent(volcanoPoints.map((point) => point.x), 0.1)];
+  }, [volcanoPoints]);
+
+  const volcanoYDomain = useMemo<[number, number]>(() => {
+    if (!volcanoPoints.length) return [0, 1];
+    const maximum = Math.max(...volcanoPoints.map((point) => point.y), 0);
+    return [0, maximum > 0 ? maximum * 1.14 : 1];
+  }, [volcanoPoints]);
+
   const distributionGroups = useMemo(() => {
     const grouped = new Map<string, number[]>();
     completeEntries.forEach((entry) =>
@@ -2797,6 +3201,56 @@ export default function Home() {
                   />
                 </div>
               ) : null}
+              <details className="group rounded-lg border border-primary/15 bg-primary/[0.025]">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-xs font-semibold text-foreground">
+                  Dataset help
+                  <span className="text-primary transition-transform group-open:rotate-180">⌄</span>
+                </summary>
+                <div className="space-y-3 border-t border-primary/10 px-3 py-3 text-[11px] leading-relaxed text-muted-foreground">
+                  <div>
+                    <p className="font-semibold text-foreground">General table format</p>
+                    <ul className="mt-1 list-disc space-y-1 pl-4">
+                      <li>Place column names in the first row.</li>
+                      <li>For most plots, use one observation or sample per row.</li>
+                      <li>Use plain numbers in numeric columns; leave missing values blank.</li>
+                      <li>
+                        Upload or paste tab-, comma-, or semicolon-separated data. Simple
+                        space-separated data are also accepted when names contain no spaces.
+                      </li>
+                    </ul>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-foreground">Special layouts</p>
+                    <ul className="mt-1 list-disc space-y-1 pl-4">
+                      <li>
+                        <strong>Grouped:</strong> include separate columns for the X-axis group and
+                        second factor.
+                      </li>
+                      <li>
+                        <strong>Paired:</strong> repeat the same subject ID for every condition.
+                      </li>
+                      <li>
+                        <strong>Volcano:</strong> include feature label, effect size, and p-value or
+                        FDR columns.
+                      </li>
+                      <li>
+                        <strong>Venn/UpSet:</strong> use an item-ID column and a set-name column,
+                        with one item–set membership per row. Repeat the item ID for membership in
+                        several sets.
+                      </li>
+                    </ul>
+                  </div>
+                  <div className="rounded bg-white px-2 py-2">
+                    <p className="font-semibold text-foreground">Reading an UpSet plot</p>
+                    <p className="mt-1">
+                      Purple bars show items in each exact intersection. Filled dots show which
+                      sets form that intersection, and connected dots indicate membership across
+                      multiple sets. Green horizontal bars show the total number of items in each
+                      set.
+                    </p>
+                  </div>
+                </div>
+              </details>
               <div className="grid grid-cols-2 gap-2 pt-1 text-xs text-muted-foreground">
                 <div className="rounded-lg bg-muted/70 px-3 py-2">
                   <strong className="block text-base text-foreground">{rows.length}</strong>
@@ -3039,10 +3493,6 @@ export default function Home() {
                       <NativeSelectOption value="upset">UpSet plot</NativeSelectOption>
                     </NativeSelect>
                   </label>
-                  <p className="text-[11px] leading-relaxed text-muted-foreground">
-                    Use long-format data: one item–set membership per row. Repeat an item on
-                    multiple rows when it belongs to multiple sets.
-                  </p>
                 </>
               ) : null}
               {plotType === "volcano" ? (
@@ -3408,16 +3858,32 @@ export default function Home() {
                     Show individual observations
                   </label>
                 ) : null}
-                {plotType === "columns" && analysis.postHoc.length ? (
-                  <label className="flex items-center gap-2">
-                    <Checkbox
-                      checked={showComparisonAnnotations}
-                      onCheckedChange={(checked) =>
-                        setShowComparisonAnnotations(Boolean(checked))
-                      }
-                    />{" "}
-                    Show selected post-test comparisons on graph
-                  </label>
+                {["columns", "grouped"].includes(plotType) && analysis.postHoc.length ? (
+                  <div className="grid gap-2 rounded-lg border border-primary/15 bg-primary/[0.025] p-2.5">
+                    <label className="flex items-center gap-2">
+                      <Checkbox
+                        checked={showComparisonAnnotations}
+                        onCheckedChange={(checked) =>
+                          setShowComparisonAnnotations(Boolean(checked))
+                        }
+                      />{" "}
+                      Show selected post-tests on graph
+                    </label>
+                    {showComparisonAnnotations ? (
+                      <label className="flex items-center gap-2 pl-6 text-muted-foreground">
+                        <Checkbox
+                          checked={showNonSignificantAnnotations}
+                          onCheckedChange={(checked) =>
+                            setShowNonSignificantAnnotations(Boolean(checked))
+                          }
+                        />{" "}
+                        Include non-significant comparisons
+                      </label>
+                    ) : null}
+                    <p className="pl-6 text-[10px] leading-relaxed text-muted-foreground">
+                      Only the first few selected comparisons are shown to keep the figure readable.
+                    </p>
+                  </div>
                 ) : null}
                 {plotType === "columns" || plotType === "grouped" ? (
                   <label className="flex items-center gap-2">
@@ -3980,7 +4446,11 @@ export default function Home() {
                         data={summaries}
                         margin={{
                           top:
-                            showComparisonAnnotations && analysis.postHoc.length
+                            showComparisonAnnotations &&
+                            analysis.postHoc.some(
+                              (comparison) =>
+                                showNonSignificantAnnotations || comparison.adjustedP < 0.05,
+                            )
                               ? 92
                               : 22,
                           right: 24,
@@ -4085,6 +4555,7 @@ export default function Home() {
                         groups={summaries.map((summary) => summary.group)}
                         width={plotWidth}
                         fontSize={tickFontSize}
+                        showNonSignificant={showNonSignificantAnnotations}
                       />
                     ) : null}
                   </div>
@@ -4092,17 +4563,32 @@ export default function Home() {
 
                 {plotType === "grouped" ? (
                   factor2 !== "__none__" && factor2Levels.length ? (
-                    <ChartContainer
-                      config={chartConfig}
-                      className="mx-auto shrink-0 aspect-auto"
+                    <div
+                      className="relative mx-auto shrink-0"
                       style={{ width: plotWidth, height: plotHeight }}
                     >
-                      <ComposedChart
-                        data={groupedChartData}
-                        barCategoryGap="20%"
-                        barGap={3}
-                        margin={{ top: 22, right: 24, bottom: 52, left: 24 }}
+                      <ChartContainer
+                        config={chartConfig}
+                        className="h-full w-full shrink-0 aspect-auto"
                       >
+                        <ComposedChart
+                          data={groupedChartData}
+                          barCategoryGap="20%"
+                          barGap={3}
+                          margin={{
+                            top:
+                              showComparisonAnnotations &&
+                              analysis.postHoc.some(
+                                (comparison) =>
+                                  showNonSignificantAnnotations || comparison.adjustedP < 0.05,
+                              )
+                                ? 100
+                                : 22,
+                            right: 24,
+                            bottom: 52,
+                            left: 24,
+                          }}
+                        >
                         {showGrid ? <CartesianGrid strokeDasharray="3 3" vertical={false} /> : null}
                         <XAxis
                           dataKey="group"
@@ -4208,8 +4694,21 @@ export default function Home() {
                           align="right"
                           wrapperStyle={{ fontSize: legendFontSize }}
                         />
-                      </ComposedChart>
-                    </ChartContainer>
+                        </ComposedChart>
+                      </ChartContainer>
+                      {showComparisonAnnotations ? (
+                        <GroupedComparisonOverlay
+                          comparisons={analysis.postHoc}
+                          groups={groupedLevels}
+                          series={factor2Levels}
+                          groupVariable={group}
+                          seriesVariable={factor2}
+                          width={plotWidth}
+                          fontSize={tickFontSize}
+                          showNonSignificant={showNonSignificantAnnotations}
+                        />
+                      ) : null}
+                    </div>
                   ) : (
                     <EmptyState text="Choose a second categorical factor to create side-by-side grouped datasets." />
                   )
@@ -4535,7 +5034,7 @@ export default function Home() {
                         <XAxis
                           type="number"
                           dataKey="x"
-                          domain={["auto", "auto"]}
+                          domain={volcanoXDomain}
                           tick={tickStyle}
                           axisLine={axisLineStyle}
                           tickLine={tickLineStyle}
@@ -4551,7 +5050,7 @@ export default function Home() {
                           type="number"
                           dataKey="y"
                           width={72}
-                          domain={[0, "auto"]}
+                          domain={volcanoYDomain}
                           tick={tickStyle}
                           axisLine={axisLineStyle}
                           tickLine={tickLineStyle}
@@ -4625,8 +5124,18 @@ export default function Home() {
                                   />
                                   {specificallyRequested ? (
                                     <text
-                                      x={Number(props.cx) + 5}
-                                      y={Number(props.cy) - 5}
+                                      x={
+                                        Number(props.cx) +
+                                        (payload.x > (volcanoXDomain[0] + volcanoXDomain[1]) / 2
+                                          ? -6
+                                          : 6)
+                                      }
+                                      y={Number(props.cy) < 24 ? Number(props.cy) + 14 : Number(props.cy) - 6}
+                                      textAnchor={
+                                        payload.x > (volcanoXDomain[0] + volcanoXDomain[1]) / 2
+                                          ? "end"
+                                          : "start"
+                                      }
                                       fontSize={Math.max(9, tickFontSize - 2)}
                                       fill="#111827"
                                       fontWeight={specificallyRequested ? 700 : 400}
@@ -4949,7 +5458,7 @@ export default function Home() {
                 reference datasets; method-specific limitations still apply.
               </p>
               <p>
-                Version 1.1.0 · Updated 20 September 2026 ·{" "}
+                Version 1.1.2 · Updated 20 September 2026 ·{" "}
                 <a
                   className="font-medium text-primary underline"
                   href="https://cariacolab.com/contact/"
