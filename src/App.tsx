@@ -73,7 +73,17 @@ import {
 } from "@/lib/statistics";
 
 type DataRow = Record<string, string>;
-type PlotType = "columns" | "grouped" | "xy" | "heatmap" | "volcano";
+type PlotType =
+  | "columns"
+  | "grouped"
+  | "distribution"
+  | "paired"
+  | "xy"
+  | "dose"
+  | "pca"
+  | "sets"
+  | "heatmap"
+  | "volcano";
 type TestChoice =
   | "auto"
   | "welch"
@@ -97,6 +107,8 @@ type HeatmapDistance = "correlation" | "euclidean" | "manhattan";
 type VolcanoThresholdMetric = "p" | "bh-fdr" | "precomputed-fdr";
 type PostHocAdjustment = "holm" | "bonferroni" | "sidak" | "bh-fdr" | "none";
 type PostHocScope = "all" | "reference" | "selected";
+type DistributionMode = "box" | "violin";
+type SetPlotMode = "auto" | "venn" | "upset";
 type HeatmapPalette =
   | "cariaco"
   | "blue-red"
@@ -704,6 +716,731 @@ function buildHeatmapDendrogram(
   return segments;
 }
 
+function quantile(values: number[], probability: number) {
+  if (!values.length) return Number.NaN;
+  const sorted = [...values].sort((a, b) => a - b);
+  const position = (sorted.length - 1) * probability;
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  if (lower === upper) return sorted[lower];
+  return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
+}
+
+function linearScale(domainMin: number, domainMax: number, rangeMin: number, rangeMax: number) {
+  const span = domainMax - domainMin || 1;
+  return (value: number) => rangeMin + ((value - domainMin) / span) * (rangeMax - rangeMin);
+}
+
+function chartExtent(values: number[], padding = 0.08) {
+  const minimum = Math.min(...values);
+  const maximum = Math.max(...values);
+  const span = maximum - minimum || Math.max(1, Math.abs(maximum) * 0.1);
+  return [minimum - span * padding, maximum + span * padding] as const;
+}
+
+function gaussianKernelDensity(values: number[], sampleValues: number[]) {
+  const sd = Math.sqrt(sampleVariance(values));
+  const range = Math.max(...values) - Math.min(...values);
+  const bandwidth = Math.max(
+    1e-9,
+    Number.isFinite(sd) && sd > 0
+      ? 1.06 * sd * Math.pow(Math.max(values.length, 2), -0.2)
+      : Math.max(range / 8, 1),
+  );
+  const normalizer = values.length * bandwidth * Math.sqrt(2 * Math.PI);
+  return sampleValues.map((sample) => ({
+    value: sample,
+    density:
+      values.reduce((sum, value) => {
+        const z = (sample - value) / bandwidth;
+        return sum + Math.exp(-0.5 * z * z);
+      }, 0) / normalizer,
+  }));
+}
+
+function DistributionPlot({
+  groups,
+  mode,
+  width,
+  height,
+  showPoints,
+  pointSize,
+  pointOpacity,
+  xLabel,
+  yLabel,
+  tickFontSize,
+  axisTitleFontSize,
+}: {
+  groups: Array<{ name: string; values: number[]; color: string }>;
+  mode: DistributionMode;
+  width: number;
+  height: number;
+  showPoints: boolean;
+  pointSize: number;
+  pointOpacity: number;
+  xLabel: string;
+  yLabel: string;
+  tickFontSize: number;
+  axisTitleFontSize: number;
+}) {
+  const allValues = groups.flatMap((group) => group.values);
+  if (!groups.length || !allValues.length) {
+    return <EmptyState text="Select an outcome and grouping variable with complete numeric observations." />;
+  }
+  const margin = { top: 24, right: 28, bottom: 78, left: 82 };
+  const [minimum, maximum] = chartExtent(allValues);
+  const y = linearScale(minimum, maximum, height - margin.bottom, margin.top);
+  const plotWidth = width - margin.left - margin.right;
+  const slotWidth = plotWidth / groups.length;
+  const yTicks = Array.from({ length: 6 }, (_, index) => minimum + ((maximum - minimum) * index) / 5);
+
+  return (
+    <svg width={width} height={height} role="img" aria-label={`${mode} distribution plot`}>
+      <rect width={width} height={height} fill="#ffffff" />
+      {yTicks.map((tick) => (
+        <g key={tick}>
+          <line
+            x1={margin.left}
+            x2={width - margin.right}
+            y1={y(tick)}
+            y2={y(tick)}
+            stroke="#e5e7eb"
+            strokeDasharray="3 3"
+          />
+          <text
+            x={margin.left - 10}
+            y={y(tick)}
+            textAnchor="end"
+            dominantBaseline="central"
+            fontSize={tickFontSize}
+            fill="#374151"
+          >
+            {formatNumber(tick)}
+          </text>
+        </g>
+      ))}
+      {groups.map((group, groupIndex) => {
+        const center = margin.left + slotWidth * (groupIndex + 0.5);
+        const q1 = quantile(group.values, 0.25);
+        const med = quantile(group.values, 0.5);
+        const q3 = quantile(group.values, 0.75);
+        const min = Math.min(...group.values);
+        const max = Math.max(...group.values);
+        const halfWidth = Math.min(46, slotWidth * 0.34);
+        const densityValues = Array.from(
+          { length: 56 },
+          (_, index) => minimum + ((maximum - minimum) * index) / 55,
+        );
+        const density = gaussianKernelDensity(group.values, densityValues);
+        const densityMaximum = Math.max(...density.map((entry) => entry.density), 1e-12);
+        const left = density.map(
+          (entry) =>
+            `${center - (entry.density / densityMaximum) * halfWidth},${y(entry.value)}`,
+        );
+        const right = [...density]
+          .reverse()
+          .map(
+            (entry) =>
+              `${center + (entry.density / densityMaximum) * halfWidth},${y(entry.value)}`,
+          );
+        return (
+          <g key={group.name}>
+            {mode === "violin" ? (
+              <>
+                <path
+                  d={`M ${left.join(" L ")} L ${right.join(" L ")} Z`}
+                  fill={group.color}
+                  fillOpacity={0.28}
+                  stroke={group.color}
+                  strokeWidth={1.6}
+                />
+                <line x1={center - halfWidth * 0.58} x2={center + halfWidth * 0.58} y1={y(med)} y2={y(med)} stroke="#111827" strokeWidth={2} />
+                <line x1={center - halfWidth * 0.42} x2={center + halfWidth * 0.42} y1={y(q1)} y2={y(q1)} stroke="#111827" strokeWidth={1} strokeDasharray="3 2" />
+                <line x1={center - halfWidth * 0.42} x2={center + halfWidth * 0.42} y1={y(q3)} y2={y(q3)} stroke="#111827" strokeWidth={1} strokeDasharray="3 2" />
+              </>
+            ) : (
+              <>
+                <line x1={center} x2={center} y1={y(min)} y2={y(max)} stroke="#111827" strokeWidth={1.5} />
+                <line x1={center - halfWidth * 0.5} x2={center + halfWidth * 0.5} y1={y(min)} y2={y(min)} stroke="#111827" strokeWidth={1.5} />
+                <line x1={center - halfWidth * 0.5} x2={center + halfWidth * 0.5} y1={y(max)} y2={y(max)} stroke="#111827" strokeWidth={1.5} />
+                <rect
+                  x={center - halfWidth}
+                  y={y(q3)}
+                  width={halfWidth * 2}
+                  height={Math.max(1, y(q1) - y(q3))}
+                  fill={group.color}
+                  fillOpacity={0.3}
+                  stroke={group.color}
+                  strokeWidth={1.8}
+                />
+                <line x1={center - halfWidth} x2={center + halfWidth} y1={y(med)} y2={y(med)} stroke="#111827" strokeWidth={2} />
+              </>
+            )}
+            {showPoints
+              ? group.values.map((value, index) => {
+                  const jitter = ((((index + 1) * 37 + groupIndex * 13) % 19) - 9) * Math.min(2.2, slotWidth / 55);
+                  return (
+                    <circle
+                      key={`${group.name}-${index}`}
+                      cx={center + jitter}
+                      cy={y(value)}
+                      r={pointSize / 2}
+                      fill={group.color}
+                      fillOpacity={pointOpacity / 100}
+                      stroke="#ffffff"
+                      strokeWidth={0.8}
+                    >
+                      <title>{`${group.name}: ${formatNumber(value)}`}</title>
+                    </circle>
+                  );
+                })
+              : null}
+            <text
+              x={center}
+              y={height - margin.bottom + 24}
+              textAnchor="middle"
+              fontSize={tickFontSize}
+              fill="#374151"
+            >
+              {group.name}
+            </text>
+          </g>
+        );
+      })}
+      <line x1={margin.left} x2={margin.left} y1={margin.top} y2={height - margin.bottom} stroke="#111827" />
+      <line x1={margin.left} x2={width - margin.right} y1={height - margin.bottom} y2={height - margin.bottom} stroke="#111827" />
+      <text x={(margin.left + width - margin.right) / 2} y={height - 18} textAnchor="middle" fontSize={axisTitleFontSize} fill="#111827">{xLabel}</text>
+      <text transform={`translate(20 ${(margin.top + height - margin.bottom) / 2}) rotate(-90)`} textAnchor="middle" fontSize={axisTitleFontSize} fill="#111827">{yLabel}</text>
+    </svg>
+  );
+}
+
+function PairedTrajectoryPlot({
+  groups,
+  subjects,
+  width,
+  height,
+  color,
+  pointSize,
+  pointOpacity,
+  xLabel,
+  yLabel,
+  tickFontSize,
+  axisTitleFontSize,
+}: {
+  groups: string[];
+  subjects: Array<{ subject: string; values: Record<string, number> }>;
+  width: number;
+  height: number;
+  color: string;
+  pointSize: number;
+  pointOpacity: number;
+  xLabel: string;
+  yLabel: string;
+  tickFontSize: number;
+  axisTitleFontSize: number;
+}) {
+  const allValues = subjects.flatMap((entry) => Object.values(entry.values));
+  if (groups.length < 2 || !subjects.length || !allValues.length) {
+    return <EmptyState text="Choose a subject ID and at least two conditions containing repeated observations." />;
+  }
+  const margin = { top: 24, right: 28, bottom: 78, left: 82 };
+  const [minimum, maximum] = chartExtent(allValues);
+  const y = linearScale(minimum, maximum, height - margin.bottom, margin.top);
+  const x = (index: number) =>
+    groups.length === 1
+      ? width / 2
+      : margin.left + ((width - margin.left - margin.right) * index) / (groups.length - 1);
+  const yTicks = Array.from({ length: 6 }, (_, index) => minimum + ((maximum - minimum) * index) / 5);
+  return (
+    <svg width={width} height={height} role="img" aria-label="Paired subject trajectories">
+      <rect width={width} height={height} fill="#ffffff" />
+      {yTicks.map((tick) => (
+        <g key={tick}>
+          <line x1={margin.left} x2={width - margin.right} y1={y(tick)} y2={y(tick)} stroke="#e5e7eb" strokeDasharray="3 3" />
+          <text x={margin.left - 10} y={y(tick)} textAnchor="end" dominantBaseline="central" fontSize={tickFontSize} fill="#374151">{formatNumber(tick)}</text>
+        </g>
+      ))}
+      {subjects.map((entry, subjectIndex) => {
+        const points = groups.flatMap((groupName, groupIndex) =>
+          Number.isFinite(entry.values[groupName])
+            ? [{ x: x(groupIndex), y: y(entry.values[groupName]), groupName }]
+            : [],
+        );
+        return (
+          <g key={entry.subject}>
+            {points.length > 1 ? (
+              <polyline points={points.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={color} strokeOpacity={0.3 + (subjectIndex % 3) * 0.08} strokeWidth={1.4} />
+            ) : null}
+            {points.map((point) => (
+              <circle key={point.groupName} cx={point.x} cy={point.y} r={pointSize / 2} fill={color} fillOpacity={pointOpacity / 100} stroke="#ffffff" strokeWidth={0.8}>
+                <title>{`${entry.subject} · ${point.groupName}: ${formatNumber(entry.values[point.groupName])}`}</title>
+              </circle>
+            ))}
+          </g>
+        );
+      })}
+      {groups.map((groupName, index) => (
+        <text key={groupName} x={x(index)} y={height - margin.bottom + 24} textAnchor="middle" fontSize={tickFontSize} fill="#374151">{groupName}</text>
+      ))}
+      <line x1={margin.left} x2={margin.left} y1={margin.top} y2={height - margin.bottom} stroke="#111827" />
+      <line x1={margin.left} x2={width - margin.right} y1={height - margin.bottom} y2={height - margin.bottom} stroke="#111827" />
+      <text x={(margin.left + width - margin.right) / 2} y={height - 18} textAnchor="middle" fontSize={axisTitleFontSize} fill="#111827">{xLabel}</text>
+      <text transform={`translate(20 ${(margin.top + height - margin.bottom) / 2}) rotate(-90)`} textAnchor="middle" fontSize={axisTitleFontSize} fill="#111827">{yLabel}</text>
+    </svg>
+  );
+}
+
+type DoseFit = {
+  bottom: number;
+  top: number;
+  midpoint: number;
+  hill: number;
+  rSquared: number;
+  predict: (x: number) => number;
+};
+
+function fourParameterLogistic(x: number, parameters: number[]) {
+  const [bottom, top, midpoint, hill] = parameters;
+  return bottom + (top - bottom) / (1 + Math.pow(10, (midpoint - x) * hill));
+}
+
+function fitFourParameterLogistic(points: Array<{ x: number; y: number }>): DoseFit | null {
+  if (points.length < 5) return null;
+  const sorted = [...points].sort((a, b) => a.x - b.x);
+  const xValues = sorted.map((point) => point.x);
+  const yValues = sorted.map((point) => point.y);
+  const xRange = Math.max(...xValues) - Math.min(...xValues) || 1;
+  const yRange = Math.max(...yValues) - Math.min(...yValues) || 1;
+  const lowMean = average(sorted.slice(0, Math.max(2, Math.ceil(sorted.length / 4))).map((point) => point.y));
+  const highMean = average(sorted.slice(-Math.max(2, Math.ceil(sorted.length / 4))).map((point) => point.y));
+  const start = [lowMean, highMean, quantile(xValues, 0.5), 1];
+  const steps = [yRange * 0.18, yRange * 0.18, xRange * 0.12, 0.45];
+  let simplex = [start, ...steps.map((step, index) => start.map((value, parameter) => value + (parameter === index ? step : 0)))];
+  const objective = (parameters: number[]) => {
+    const [bottom, top, midpoint, hill] = parameters;
+    if (
+      !parameters.every(Number.isFinite) ||
+      Math.abs(hill) < 0.02 ||
+      Math.abs(hill) > 12 ||
+      midpoint < Math.min(...xValues) - xRange * 2 ||
+      midpoint > Math.max(...xValues) + xRange * 2 ||
+      bottom < Math.min(...yValues) - yRange * 4 ||
+      bottom > Math.max(...yValues) + yRange * 4 ||
+      top < Math.min(...yValues) - yRange * 4 ||
+      top > Math.max(...yValues) + yRange * 4
+    ) return 1e30;
+    return points.reduce((sum, point) => {
+      const residual = point.y - fourParameterLogistic(point.x, parameters);
+      return sum + residual * residual;
+    }, 0);
+  };
+  for (let iteration = 0; iteration < 240; iteration += 1) {
+    simplex.sort((a, b) => objective(a) - objective(b));
+    const best = simplex[0];
+    const worst = simplex[simplex.length - 1];
+    const centroid = best.map((_, parameter) =>
+      average(simplex.slice(0, -1).map((vertex) => vertex[parameter])),
+    );
+    const reflected = centroid.map((value, parameter) => value + (value - worst[parameter]));
+    if (objective(reflected) < objective(best)) {
+      const expanded = centroid.map((value, parameter) => value + 2 * (reflected[parameter] - value));
+      simplex[simplex.length - 1] = objective(expanded) < objective(reflected) ? expanded : reflected;
+    } else if (objective(reflected) < objective(simplex[simplex.length - 2])) {
+      simplex[simplex.length - 1] = reflected;
+    } else {
+      const contracted = centroid.map((value, parameter) => value + 0.5 * (worst[parameter] - value));
+      if (objective(contracted) < objective(worst)) {
+        simplex[simplex.length - 1] = contracted;
+      } else {
+        simplex = [best, ...simplex.slice(1).map((vertex) => vertex.map((value, parameter) => best[parameter] + 0.5 * (value - best[parameter])))];
+      }
+    }
+  }
+  simplex.sort((a, b) => objective(a) - objective(b));
+  const [bottom, top, midpoint, hill] = simplex[0];
+  const sse = objective(simplex[0]);
+  const meanY = average(yValues);
+  const total = yValues.reduce((sum, value) => sum + (value - meanY) ** 2, 0);
+  return {
+    bottom,
+    top,
+    midpoint,
+    hill,
+    rSquared: total > 0 ? 1 - sse / total : Number.NaN,
+    predict: (x) => fourParameterLogistic(x, simplex[0]),
+  };
+}
+
+type PcaResult = {
+  points: Array<{ pc1: number; pc2: number; label: string; group: string }>;
+  explained1: number;
+  explained2: number;
+  loadings: Array<{ variable: string; pc1: number; pc2: number }>;
+};
+
+function vectorNorm(vector: number[]) {
+  return Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+}
+
+function leadingEigen(matrix: number[][], seed: number) {
+  let vector = matrix.map((_, index) => (index === seed % matrix.length ? 1 : 0.5 / Math.max(1, matrix.length - 1)));
+  for (let iteration = 0; iteration < 160; iteration += 1) {
+    const next = matrix.map((row) => row.reduce((sum, value, index) => sum + value * vector[index], 0));
+    const norm = vectorNorm(next);
+    if (!Number.isFinite(norm) || norm < 1e-12) break;
+    vector = next.map((value) => value / norm);
+  }
+  const projected = matrix.map((row) => row.reduce((sum, value, index) => sum + value * vector[index], 0));
+  const value = vector.reduce((sum, entry, index) => sum + entry * projected[index], 0);
+  return { value, vector };
+}
+
+function calculatePca(
+  rows: DataRow[],
+  variables: string[],
+  labelVariable: string,
+  groupVariable: string,
+): PcaResult | null {
+  if (variables.length < 2) return null;
+  const complete = rows.flatMap((row, index) => {
+    const values = variables.map((variable) => Number(row[variable]));
+    return values.every(Number.isFinite)
+      ? [{ values, label: row[labelVariable] || row.sample_id || `Row ${index + 1}`, group: groupVariable === "__none__" ? "All samples" : row[groupVariable] || "Missing" }]
+      : [];
+  });
+  if (complete.length < 3) return null;
+  const means = variables.map((_, column) => average(complete.map((entry) => entry.values[column])));
+  const sds = variables.map((_, column) => Math.sqrt(sampleVariance(complete.map((entry) => entry.values[column]))));
+  if (sds.some((sd) => !Number.isFinite(sd) || sd <= 0)) return null;
+  const standardized = complete.map((entry) => entry.values.map((value, column) => (value - means[column]) / sds[column]));
+  const covariance = variables.map((_, first) =>
+    variables.map((__, second) => standardized.reduce((sum, row) => sum + row[first] * row[second], 0) / Math.max(1, standardized.length - 1)),
+  );
+  const first = leadingEigen(covariance, 0);
+  const deflated = covariance.map((row, rowIndex) => row.map((value, columnIndex) => value - first.value * first.vector[rowIndex] * first.vector[columnIndex]));
+  const second = leadingEigen(deflated, 1);
+  const totalVariance = covariance.reduce((sum, row, index) => sum + row[index], 0);
+  return {
+    points: standardized.map((values, index) => ({
+      pc1: values.reduce((sum, value, column) => sum + value * first.vector[column], 0),
+      pc2: values.reduce((sum, value, column) => sum + value * second.vector[column], 0),
+      label: complete[index].label,
+      group: complete[index].group,
+    })),
+    explained1: totalVariance > 0 ? first.value / totalVariance : Number.NaN,
+    explained2: totalVariance > 0 ? second.value / totalVariance : Number.NaN,
+    loadings: variables.map((variable, index) => ({ variable, pc1: first.vector[index], pc2: second.vector[index] })),
+  };
+}
+
+function SetIntersectionPlot({
+  rows,
+  itemVariable,
+  setVariable,
+  mode,
+  width,
+  height,
+  tickFontSize,
+}: {
+  rows: DataRow[];
+  itemVariable: string;
+  setVariable: string;
+  mode: SetPlotMode;
+  width: number;
+  height: number;
+  tickFontSize: number;
+}) {
+  const model = useMemo(() => {
+    const memberships = new Map<string, Set<string>>();
+    const setOrder: string[] = [];
+    rows.forEach((row) => {
+      const item = row[itemVariable]?.trim();
+      const setName = row[setVariable]?.trim();
+      if (!item || !setName) return;
+      if (!setOrder.includes(setName)) setOrder.push(setName);
+      const itemSets = memberships.get(item) ?? new Set<string>();
+      itemSets.add(setName);
+      memberships.set(item, itemSets);
+    });
+    const setNames = setOrder.slice(0, 8);
+    const intersections = new Map<string, string[]>();
+    memberships.forEach((sets, item) => {
+      const included = setNames.filter((setName) => sets.has(setName));
+      if (!included.length) return;
+      const key = included.join("\u0000");
+      intersections.set(key, [...(intersections.get(key) ?? []), item]);
+    });
+    return {
+      setNames,
+      intersections: [...intersections.entries()]
+        .map(([key, items]) => ({ sets: key.split("\u0000"), items, count: items.length }))
+        .sort((a, b) => b.count - a.count || a.sets.length - b.sets.length),
+      itemCount: memberships.size,
+    };
+  }, [itemVariable, rows, setVariable]);
+
+  if (!itemVariable || !setVariable || model.setNames.length < 2 || !model.intersections.length) {
+    return (
+      <EmptyState text="Choose an item identifier and a set-membership column. Repeat an item on multiple rows when it belongs to multiple sets." />
+    );
+  }
+  const activeMode = mode === "auto" ? (model.setNames.length <= 3 ? "venn" : "upset") : mode;
+  if (activeMode === "venn" && model.setNames.length <= 3) {
+    const countFor = (...sets: string[]) =>
+      model.intersections.find(
+        (intersection) =>
+          intersection.sets.length === sets.length &&
+          sets.every((setName) => intersection.sets.includes(setName)),
+      )?.count ?? 0;
+    const [a, b, c] = model.setNames;
+    const radius = Math.min(width * 0.2, height * 0.26, 120);
+    const centerY = height * 0.5;
+    return (
+      <svg width={width} height={height} role="img" aria-label="Venn diagram">
+        <rect width={width} height={height} fill="#ffffff" />
+        {model.setNames.length === 2 ? (
+          <>
+            <circle cx={width * 0.42} cy={centerY} r={radius} fill="#440154" fillOpacity={0.28} stroke="#440154" strokeWidth={2} />
+            <circle cx={width * 0.58} cy={centerY} r={radius} fill="#22a884" fillOpacity={0.28} stroke="#16836b" strokeWidth={2} />
+            <text x={width * 0.34} y={centerY - radius - 14} textAnchor="middle" fontSize={tickFontSize + 1} fontWeight={700}>{a}</text>
+            <text x={width * 0.66} y={centerY - radius - 14} textAnchor="middle" fontSize={tickFontSize + 1} fontWeight={700}>{b}</text>
+            <text x={width * 0.35} y={centerY} textAnchor="middle" fontSize={tickFontSize + 4} fontWeight={700}>{countFor(a)}</text>
+            <text x={width * 0.5} y={centerY} textAnchor="middle" fontSize={tickFontSize + 4} fontWeight={700}>{countFor(a, b)}</text>
+            <text x={width * 0.65} y={centerY} textAnchor="middle" fontSize={tickFontSize + 4} fontWeight={700}>{countFor(b)}</text>
+          </>
+        ) : (
+          <>
+            <circle cx={width * 0.42} cy={height * 0.43} r={radius} fill="#440154" fillOpacity={0.25} stroke="#440154" strokeWidth={2} />
+            <circle cx={width * 0.58} cy={height * 0.43} r={radius} fill="#21918c" fillOpacity={0.25} stroke="#16836b" strokeWidth={2} />
+            <circle cx={width * 0.5} cy={height * 0.61} r={radius} fill="#fde725" fillOpacity={0.25} stroke="#b9a800" strokeWidth={2} />
+            <text x={width * 0.32} y={height * 0.18} textAnchor="middle" fontSize={tickFontSize + 1} fontWeight={700}>{a}</text>
+            <text x={width * 0.68} y={height * 0.18} textAnchor="middle" fontSize={tickFontSize + 1} fontWeight={700}>{b}</text>
+            <text x={width * 0.5} y={height * 0.91} textAnchor="middle" fontSize={tickFontSize + 1} fontWeight={700}>{c}</text>
+            <text x={width * 0.34} y={height * 0.4} textAnchor="middle" fontSize={tickFontSize + 2} fontWeight={700}>{countFor(a)}</text>
+            <text x={width * 0.66} y={height * 0.4} textAnchor="middle" fontSize={tickFontSize + 2} fontWeight={700}>{countFor(b)}</text>
+            <text x={width * 0.5} y={height * 0.74} textAnchor="middle" fontSize={tickFontSize + 2} fontWeight={700}>{countFor(c)}</text>
+            <text x={width * 0.5} y={height * 0.36} textAnchor="middle" fontSize={tickFontSize + 2} fontWeight={700}>{countFor(a, b)}</text>
+            <text x={width * 0.42} y={height * 0.57} textAnchor="middle" fontSize={tickFontSize + 2} fontWeight={700}>{countFor(a, c)}</text>
+            <text x={width * 0.58} y={height * 0.57} textAnchor="middle" fontSize={tickFontSize + 2} fontWeight={700}>{countFor(b, c)}</text>
+            <text x={width * 0.5} y={height * 0.5} textAnchor="middle" fontSize={tickFontSize + 3} fontWeight={800}>{countFor(a, b, c)}</text>
+          </>
+        )}
+        <text x={width / 2} y={height - 12} textAnchor="middle" fontSize={tickFontSize} fill="#6b7280">{model.itemCount} unique items · exact region counts</text>
+      </svg>
+    );
+  }
+
+  const intersections = model.intersections.slice(0, 16);
+  const left = 150;
+  const columnWidth = 48;
+  const upsetWidth = Math.max(width, left + intersections.length * columnWidth + 28);
+  const barTop = 28;
+  const barBottom = Math.min(210, height * 0.47);
+  const matrixTop = barBottom + 44;
+  const rowHeight = 27;
+  const maximum = Math.max(...intersections.map((entry) => entry.count), 1);
+  const barScale = linearScale(0, maximum, barBottom, barTop);
+  return (
+    <div className="overflow-x-auto">
+      <svg width={upsetWidth} height={Math.max(height, matrixTop + model.setNames.length * rowHeight + 48)} role="img" aria-label="UpSet intersection plot">
+        <rect width={upsetWidth} height="100%" fill="#ffffff" />
+        <text x={20} y={18} fontSize={tickFontSize} fontWeight={700} fill="#111827">Intersection size</text>
+        {intersections.map((intersection, index) => {
+          const x = left + index * columnWidth + columnWidth / 2;
+          const activeRows = model.setNames.flatMap((setName, rowIndex) => intersection.sets.includes(setName) ? [rowIndex] : []);
+          return (
+            <g key={intersection.sets.join("+")}>
+              <rect x={x - 14} y={barScale(intersection.count)} width={28} height={barBottom - barScale(intersection.count)} rx={3} fill="#f92080" fillOpacity={0.84} />
+              <text x={x} y={barScale(intersection.count) - 6} textAnchor="middle" fontSize={tickFontSize - 1} fontWeight={700}>{intersection.count}</text>
+              {activeRows.length > 1 ? <line x1={x} x2={x} y1={matrixTop + Math.min(...activeRows) * rowHeight} y2={matrixTop + Math.max(...activeRows) * rowHeight} stroke="#111827" strokeWidth={2} /> : null}
+              {model.setNames.map((setName, rowIndex) => (
+                <circle key={setName} cx={x} cy={matrixTop + rowIndex * rowHeight} r={intersection.sets.includes(setName) ? 5.5 : 3.5} fill={intersection.sets.includes(setName) ? "#111827" : "#d1d5db"} />
+              ))}
+              <title>{`${intersection.sets.join(" ∩ ")}: ${intersection.count}\n${intersection.items.slice(0, 12).join(", ")}${intersection.items.length > 12 ? "…" : ""}`}</title>
+            </g>
+          );
+        })}
+        {model.setNames.map((setName, index) => (
+          <g key={setName}>
+            <text x={left - 14} y={matrixTop + index * rowHeight} textAnchor="end" dominantBaseline="central" fontSize={tickFontSize} fontWeight={600}>{setName}</text>
+            <line x1={left} x2={upsetWidth - 18} y1={matrixTop + index * rowHeight + rowHeight / 2} y2={matrixTop + index * rowHeight + rowHeight / 2} stroke="#f3f4f6" />
+          </g>
+        ))}
+        <line x1={left} x2={upsetWidth - 18} y1={barBottom} y2={barBottom} stroke="#111827" />
+        <text x={upsetWidth / 2} y={matrixTop + model.setNames.length * rowHeight + 30} textAnchor="middle" fontSize={tickFontSize} fill="#6b7280">Top {intersections.length} exact intersections · {model.itemCount} unique items</text>
+      </svg>
+    </div>
+  );
+}
+
+function DoseResponsePlot({
+  series,
+  width,
+  height,
+  xLabel,
+  yLabel,
+  pointSize,
+  pointOpacity,
+  tickFontSize,
+  axisTitleFontSize,
+}: {
+  series: Array<{ name: string; color: string; points: Array<{ x: number; y: number }>; fit: DoseFit | null }>;
+  width: number;
+  height: number;
+  xLabel: string;
+  yLabel: string;
+  pointSize: number;
+  pointOpacity: number;
+  tickFontSize: number;
+  axisTitleFontSize: number;
+}) {
+  const allPoints = series.flatMap((entry) => entry.points);
+  if (!allPoints.length) return <EmptyState text="Select numeric dose and response columns with at least five complete observations." />;
+  const margin = { top: 28, right: 30, bottom: 78, left: 82 };
+  const [xMin, xMax] = chartExtent(allPoints.map((point) => point.x), 0.03);
+  const [yMin, yMax] = chartExtent(allPoints.map((point) => point.y));
+  const x = linearScale(xMin, xMax, margin.left, width - margin.right);
+  const y = linearScale(yMin, yMax, height - margin.bottom, margin.top);
+  const xTicks = Array.from({ length: 6 }, (_, index) => xMin + ((xMax - xMin) * index) / 5);
+  const yTicks = Array.from({ length: 6 }, (_, index) => yMin + ((yMax - yMin) * index) / 5);
+  return (
+    <div>
+      <svg width={width} height={height} role="img" aria-label="Four-parameter dose response curve">
+        <rect width={width} height={height} fill="#ffffff" />
+        {yTicks.map((tick) => (
+          <g key={`y-${tick}`}>
+            <line x1={margin.left} x2={width - margin.right} y1={y(tick)} y2={y(tick)} stroke="#e5e7eb" strokeDasharray="3 3" />
+            <text x={margin.left - 10} y={y(tick)} textAnchor="end" dominantBaseline="central" fontSize={tickFontSize}>{formatNumber(tick)}</text>
+          </g>
+        ))}
+        {xTicks.map((tick) => (
+          <text key={`x-${tick}`} x={x(tick)} y={height - margin.bottom + 24} textAnchor="middle" fontSize={tickFontSize}>{formatNumber(tick)}</text>
+        ))}
+        {series.map((entry) => {
+          const curve = entry.fit
+            ? Array.from({ length: 100 }, (_, index) => {
+                const value = xMin + ((xMax - xMin) * index) / 99;
+                return `${x(value)},${y(entry.fit?.predict(value) ?? Number.NaN)}`;
+              })
+            : [];
+          return (
+            <g key={entry.name}>
+              {curve.length ? <polyline points={curve.join(" ")} fill="none" stroke={entry.color} strokeWidth={2.4} /> : null}
+              {entry.points.map((point, index) => (
+                <circle key={index} cx={x(point.x)} cy={y(point.y)} r={pointSize / 2} fill={entry.color} fillOpacity={pointOpacity / 100} stroke="#ffffff" strokeWidth={0.8}>
+                  <title>{`${entry.name}: ${formatNumber(point.x)}, ${formatNumber(point.y)}`}</title>
+                </circle>
+              ))}
+            </g>
+          );
+        })}
+        <line x1={margin.left} x2={margin.left} y1={margin.top} y2={height - margin.bottom} stroke="#111827" />
+        <line x1={margin.left} x2={width - margin.right} y1={height - margin.bottom} y2={height - margin.bottom} stroke="#111827" />
+        <text x={(margin.left + width - margin.right) / 2} y={height - 18} textAnchor="middle" fontSize={axisTitleFontSize}>{xLabel}</text>
+        <text transform={`translate(20 ${(margin.top + height - margin.bottom) / 2}) rotate(-90)`} textAnchor="middle" fontSize={axisTitleFontSize}>{yLabel}</text>
+      </svg>
+      <div className="mt-3 overflow-x-auto">
+        <Table>
+          <TableHeader><TableRow><TableHead>Series</TableHead><TableHead>Bottom</TableHead><TableHead>Top</TableHead><TableHead>Midpoint</TableHead><TableHead>Hill slope</TableHead><TableHead>R²</TableHead></TableRow></TableHeader>
+          <TableBody>
+            {series.map((entry) => (
+              <TableRow key={entry.name}><TableCell className="font-medium">{entry.name}</TableCell><TableCell>{entry.fit ? formatNumber(entry.fit.bottom) : "Insufficient fit"}</TableCell><TableCell>{entry.fit ? formatNumber(entry.fit.top) : "—"}</TableCell><TableCell>{entry.fit ? formatNumber(entry.fit.midpoint) : "—"}</TableCell><TableCell>{entry.fit ? formatNumber(entry.fit.hill) : "—"}</TableCell><TableCell>{entry.fit ? formatNumber(entry.fit.rSquared) : "—"}</TableCell></TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+}
+
+function PcaPlot({
+  result,
+  width,
+  height,
+  colors,
+  pointSize,
+  pointOpacity,
+  tickFontSize,
+  axisTitleFontSize,
+}: {
+  result: PcaResult | null;
+  width: number;
+  height: number;
+  colors: Map<string, string>;
+  pointSize: number;
+  pointOpacity: number;
+  tickFontSize: number;
+  axisTitleFontSize: number;
+}) {
+  if (!result?.points.length) return <EmptyState text="Select at least two numeric variables with complete data and non-zero variance." />;
+  const margin = { top: 26, right: 34, bottom: 78, left: 82 };
+  const [xMin, xMax] = chartExtent(result.points.map((point) => point.pc1), 0.12);
+  const [yMin, yMax] = chartExtent(result.points.map((point) => point.pc2), 0.12);
+  const x = linearScale(xMin, xMax, margin.left, width - margin.right);
+  const y = linearScale(yMin, yMax, height - margin.bottom, margin.top);
+  return (
+    <div>
+      <svg width={width} height={height} role="img" aria-label="PCA score plot">
+        <rect width={width} height={height} fill="#ffffff" />
+        <line x1={margin.left} x2={width - margin.right} y1={y(0)} y2={y(0)} stroke="#d1d5db" strokeDasharray="4 4" />
+        <line x1={x(0)} x2={x(0)} y1={margin.top} y2={height - margin.bottom} stroke="#d1d5db" strokeDasharray="4 4" />
+        {result.points.map((point, index) => (
+          <circle key={`${point.label}-${index}`} cx={x(point.pc1)} cy={y(point.pc2)} r={pointSize / 2 + 1} fill={colors.get(point.group) ?? "#f92080"} fillOpacity={pointOpacity / 100} stroke="#ffffff" strokeWidth={1}>
+            <title>{`${point.label} · ${point.group}\nPC1 ${formatNumber(point.pc1)}, PC2 ${formatNumber(point.pc2)}`}</title>
+          </circle>
+        ))}
+        <line x1={margin.left} x2={margin.left} y1={margin.top} y2={height - margin.bottom} stroke="#111827" />
+        <line x1={margin.left} x2={width - margin.right} y1={height - margin.bottom} y2={height - margin.bottom} stroke="#111827" />
+        <text x={(margin.left + width - margin.right) / 2} y={height - 18} textAnchor="middle" fontSize={axisTitleFontSize}>PC1 ({formatNumber(result.explained1 * 100, 1)}%)</text>
+        <text transform={`translate(20 ${(margin.top + height - margin.bottom) / 2}) rotate(-90)`} textAnchor="middle" fontSize={axisTitleFontSize}>PC2 ({formatNumber(result.explained2 * 100, 1)}%)</text>
+        {[...colors.entries()].map(([name, color], index) => (
+          <g key={name}><circle cx={width - margin.right - 110} cy={margin.top + index * 18} r={4} fill={color} /><text x={width - margin.right - 100} y={margin.top + index * 18} dominantBaseline="central" fontSize={tickFontSize}>{name}</text></g>
+        ))}
+      </svg>
+      <div className="mt-3 overflow-x-auto">
+        <Table><TableHeader><TableRow><TableHead>Variable</TableHead><TableHead>PC1 loading</TableHead><TableHead>PC2 loading</TableHead></TableRow></TableHeader><TableBody>{result.loadings.map((loading) => <TableRow key={loading.variable}><TableCell className="font-medium">{loading.variable}</TableCell><TableCell>{formatNumber(loading.pc1)}</TableCell><TableCell>{formatNumber(loading.pc2)}</TableCell></TableRow>)}</TableBody></Table>
+      </div>
+    </div>
+  );
+}
+
+function ComparisonOverlay({
+  comparisons,
+  groups,
+  width,
+  fontSize,
+}: {
+  comparisons: PairwiseComparison[];
+  groups: string[];
+  width: number;
+  fontSize: number;
+}) {
+  const visible = comparisons
+    .filter((comparison) => groups.includes(comparison.first) && groups.includes(comparison.second))
+    .slice(0, 4);
+  if (!visible.length || groups.length < 2) return null;
+  const left = 96;
+  const right = 24;
+  const slot = (width - left - right) / groups.length;
+  const center = (name: string) => left + (groups.indexOf(name) + 0.5) * slot;
+  return (
+    <svg className="pointer-events-none absolute inset-x-0 top-0" width={width} height={86} aria-hidden="true">
+      {visible.map((comparison, index) => {
+        const x1 = center(comparison.first);
+        const x2 = center(comparison.second);
+        const y = 12 + index * 17;
+        return (
+          <g key={comparisonKey(comparison)}>
+            <path d={`M ${x1} ${y + 6} V ${y} H ${x2} V ${y + 6}`} fill="none" stroke="#111827" strokeWidth={1} />
+            <text x={(x1 + x2) / 2} y={y - 2} textAnchor="middle" fontSize={Math.max(9, fontSize - 1)} fontWeight={700} fill="#111827">{significanceLabel(comparison.adjustedP)}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 export default function Home() {
   const [rows, setRows] = useState<DataRow[]>(demoRows);
   const [fileName, setFileName] = useState(demoDatasetName);
@@ -724,6 +1461,17 @@ export default function Home() {
     "flipper_length_mm",
     "body_mass_g",
   ]);
+  const [pcaColumns, setPcaColumns] = useState<string[]>([
+    "bill_length_mm",
+    "bill_depth_mm",
+    "flipper_length_mm",
+    "body_mass_g",
+  ]);
+  const [distributionMode, setDistributionMode] = useState<DistributionMode>("violin");
+  const [setItemVariable, setSetItemVariable] = useState("sample_id");
+  const [setMembershipVariable, setSetMembershipVariable] = useState("species");
+  const [setPlotMode, setSetPlotMode] = useState<SetPlotMode>("auto");
+  const [doseLogX, setDoseLogX] = useState(true);
   const [testChoice, setTestChoice] = useState<TestChoice>("auto");
   const [outlierMethod, setOutlierMethod] = useState<OutlierMethod>("mad");
   const [errorType, setErrorType] = useState<ErrorType>("sem");
@@ -756,6 +1504,7 @@ export default function Home() {
   const [showGrid, setShowGrid] = useState(true);
   const [showPoints, setShowPoints] = useState(true);
   const [showErrorBars, setShowErrorBars] = useState(true);
+  const [showComparisonAnnotations, setShowComparisonAnnotations] = useState(true);
   const [volcanoLabelList, setVolcanoLabelList] = useState("");
   const [postHocEnabled, setPostHocEnabled] = useState(true);
   const [postHocAdjustment, setPostHocAdjustment] = useState<PostHocAdjustment>("holm");
@@ -1043,6 +1792,30 @@ export default function Home() {
       nonNormal || outliers.size > 0
         ? " Diagnostics indicate non-normality or potential outliers; inspect the data and consider a robust or non-parametric sensitivity analysis."
         : " Residual diagnostics do not show a clear normality problem.";
+    if (plotType === "sets") {
+      return {
+        test: "auto" as TestChoice,
+        title: "Descriptive set intersections",
+        reason:
+          "Venn and UpSet views summarize exact membership combinations; they do not perform a hypothesis test.",
+      };
+    }
+    if (plotType === "pca") {
+      return {
+        test: "auto" as TestChoice,
+        title: "Exploratory PCA",
+        reason:
+          "Variables are standardized before PCA. Inspect explained variance, scores, and loadings; PCA does not test group differences.",
+      };
+    }
+    if (plotType === "dose") {
+      return {
+        test: "auto" as TestChoice,
+        title: "Four-parameter logistic fit",
+        reason:
+          "The exploratory 4PL fit estimates bottom, top, midpoint, Hill slope, and R². Confirm final parameter confidence intervals in validated curve-fitting software.",
+      };
+    }
     if (plotType === "xy") {
       return nonNormal || outliers.size
         ? {
@@ -1519,14 +2292,70 @@ export default function Home() {
     [volcanoPoints],
   );
 
+  const distributionGroups = useMemo(() => {
+    const grouped = new Map<string, number[]>();
+    completeEntries.forEach((entry) =>
+      grouped.set(entry.group, [...(grouped.get(entry.group) ?? []), entry.value]),
+    );
+    return [...grouped.entries()].map(([name, values]) => ({ name, values }));
+  }, [completeEntries]);
+
+  const pairedSubjects = useMemo(() => {
+    if (subject === "__none__") return [];
+    const bySubject = new Map<string, Map<string, number[]>>();
+    completeEntries.forEach((entry) => {
+      if (!entry.subject) return;
+      const byGroup = bySubject.get(entry.subject) ?? new Map<string, number[]>();
+      byGroup.set(entry.group, [...(byGroup.get(entry.group) ?? []), entry.value]);
+      bySubject.set(entry.subject, byGroup);
+    });
+    return [...bySubject.entries()].map(([subjectName, byGroup]) => ({
+      subject: subjectName,
+      values: Object.fromEntries(
+        [...byGroup.entries()].map(([groupName, values]) => [groupName, average(values)]),
+      ),
+    }));
+  }, [completeEntries, subject]);
+
+  const doseSeries = useMemo(() => {
+    const grouped = new Map<string, Array<{ x: number; y: number }>>();
+    rows.forEach((row) => {
+      const rawX = Number(row[xVariable]);
+      const y = Number(row[outcome]);
+      if (!Number.isFinite(rawX) || !Number.isFinite(y) || (doseLogX && rawX <= 0)) return;
+      const x = doseLogX ? Math.log10(rawX) : rawX;
+      const name = group === "__none__" ? "All samples" : row[group] || "Missing";
+      grouped.set(name, [...(grouped.get(name) ?? []), { x, y }]);
+    });
+    return [...grouped.entries()].map(([name, points]) => ({
+      name,
+      points,
+      fit: fitFourParameterLogistic(points),
+    }));
+  }, [doseLogX, group, outcome, rows, xVariable]);
+
+  const pcaResult = useMemo(
+    () => calculatePca(rows, pcaColumns.filter((column) => numbers.includes(column)), labelVariable, group),
+    [group, labelVariable, numbers, pcaColumns, rows],
+  );
+
+  const pcaGroups = useMemo(
+    () => [...new Set(pcaResult?.points.map((point) => point.group) ?? [])],
+    [pcaResult],
+  );
+
   const colourSeries =
-    plotType === "columns"
+    plotType === "columns" || plotType === "distribution" || plotType === "paired"
       ? summaries.map((summary) => summary.group)
       : plotType === "grouped"
         ? factor2Levels
         : plotType === "xy"
           ? relationshipGroups.map(([name]) => name)
-          : [];
+          : plotType === "dose"
+            ? doseSeries.map((entry) => entry.name)
+            : plotType === "pca"
+              ? pcaGroups
+              : [];
   const colourContext =
     plotType === "grouped" ? `grouped:${group}:${factor2}` : `${plotType}:${group}`;
   const seriesColourKey = (name: string) => `${colourContext}\u0000${name}`;
@@ -1556,16 +2385,46 @@ export default function Home() {
       ? `${outcome} by ${group === "__none__" ? "sample" : group}`
       : plotType === "grouped"
         ? `${outcome} by ${group} and ${factor2 === "__none__" ? "second factor" : factor2}`
+        : plotType === "distribution"
+          ? `${outcome} distributions by ${group === "__none__" ? "sample" : group}`
+          : plotType === "paired"
+            ? `${outcome} paired trajectories by ${group}`
         : plotType === "xy"
           ? `${outcome} versus ${xVariable}`
+          : plotType === "dose"
+            ? `${outcome} dose–response by ${group === "__none__" ? "series" : group}`
+            : plotType === "pca"
+              ? "Principal component analysis"
+              : plotType === "sets"
+                ? "Set intersections"
           : plotType === "heatmap"
             ? "Correlation heatmap"
             : "Volcano plot");
   const displayXLabel =
-    xLabel || (plotType === "xy" ? xVariable : plotType === "volcano" ? effectVariable : group);
+    xLabel ||
+    (plotType === "xy"
+      ? xVariable
+      : plotType === "dose"
+        ? doseLogX
+          ? `log₁₀(${xVariable})`
+          : xVariable
+        : plotType === "volcano"
+          ? effectVariable
+          : plotType === "pca"
+            ? "PC1"
+            : plotType === "sets"
+              ? "Intersections"
+              : group);
   const volcanoMetricLabel = volcanoThresholdMetric === "p" ? "p" : "FDR";
   const displayYLabel =
-    yLabel || (plotType === "volcano" ? `−log10(${volcanoMetricLabel})` : outcome);
+    yLabel ||
+    (plotType === "volcano"
+      ? `−log10(${volcanoMetricLabel})`
+      : plotType === "pca"
+        ? "PC2"
+        : plotType === "sets"
+          ? "Intersection size"
+          : outcome);
   const descriptiveSummaries: Array<GroupSummary & { factor2?: string }> =
     plotType === "grouped" ? groupedSummaries : summaries;
   const axisLineStyle = { stroke: "#111827", strokeWidth: axisLineWidth };
@@ -1609,6 +2468,9 @@ export default function Home() {
     setPVariable(likelyP);
     setLabelVariable(likelyLabel);
     setHeatmapColumns(nextNumbers.slice(0, 8));
+    setPcaColumns(nextNumbers.slice(0, 8));
+    setSetItemVariable(likelyLabel);
+    setSetMembershipVariable(nextCategories[0] ?? "");
     setPlotTitle("");
     setXLabel("");
     setYLabel("");
@@ -1658,6 +2520,14 @@ export default function Home() {
       const retained = current.filter((column) => nextNumbers.includes(column));
       return retained.length >= 2 ? retained : nextNumbers.slice(0, 8);
     });
+    setPcaColumns((current) => {
+      const retained = current.filter((column) => nextNumbers.includes(column));
+      return retained.length >= 2 ? retained : nextNumbers.slice(0, 8);
+    });
+    setSetItemVariable((current) => (nextColumns.includes(current) ? current : nextColumns[0]));
+    setSetMembershipVariable((current) =>
+      nextCategories.includes(current) ? current : (nextCategories[0] ?? ""),
+    );
     setError("");
   }
 
@@ -1682,6 +2552,9 @@ export default function Home() {
     setGroup("species");
     setLabelVariable("sample_id");
     setHeatmapColumns(["bill_length_mm", "bill_depth_mm", "flipper_length_mm", "body_mass_g"]);
+    setPcaColumns(["bill_length_mm", "bill_depth_mm", "flipper_length_mm", "body_mass_g"]);
+    setSetItemVariable("sample_id");
+    setSetMembershipVariable("species");
     setHeatmapPalette("viridis");
     setHeatmapLinkage("average");
     setHeatmapDistance("correlation");
@@ -1699,6 +2572,22 @@ export default function Home() {
           (column) => column !== group && /sex|condition|time|genotype|batch/i.test(column),
         ) ?? categories.find((column) => column !== group);
       if (suggestedSecondFactor) setFactor2(suggestedSecondFactor);
+    }
+    if (nextPlot === "paired" && subject === "__none__") {
+      const suggestedSubject =
+        allColumns.find((column) => /subject|donor|patient|animal|sample.*id|^id$/i.test(column)) ??
+        categories.find((column) => column !== group);
+      if (suggestedSubject) setSubject(suggestedSubject);
+    }
+    if (nextPlot === "dose") {
+      const suggestedDose = numbers.find((column) => /dose|concentration|conc|time/i.test(column));
+      if (suggestedDose) setXVariable(suggestedDose);
+    }
+    if (nextPlot === "sets") {
+      if (!allColumns.includes(setItemVariable)) setSetItemVariable(labelVariable);
+      if (!categories.includes(setMembershipVariable)) {
+        setSetMembershipVariable(categories[0] ?? "");
+      }
     }
   }
 
@@ -1813,10 +2702,19 @@ export default function Home() {
   }> = [
     { type: "columns", label: "Column", icon: BarChart3 },
     { type: "grouped", label: "Grouped", icon: BarChart3 },
+    { type: "distribution", label: "Box / violin", icon: BarChart3 },
+    { type: "paired", label: "Paired", icon: Activity },
     { type: "xy", label: "XY & correlation", icon: Activity },
+    { type: "dose", label: "Dose–response", icon: Activity },
+    { type: "pca", label: "PCA", icon: Sparkles },
+    { type: "sets", label: "Venn / UpSet", icon: Grid3X3 },
     { type: "heatmap", label: "Heatmap", icon: Grid3X3 },
     { type: "volcano", label: "Volcano", icon: Sparkles },
   ];
+
+  const pcaColourMap = new Map(
+    pcaGroups.map((name, index) => [name, seriesColor(index, name)]),
+  );
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -1939,7 +2837,7 @@ export default function Home() {
                 ))}
               </div>
 
-              {plotType !== "heatmap" && plotType !== "volcano" ? (
+              {!["heatmap", "volcano", "sets", "pca"].includes(plotType) ? (
                 <label className="grid gap-1.5 text-xs font-medium">
                   Outcome
                   <NativeSelect
@@ -1955,9 +2853,9 @@ export default function Home() {
                   </NativeSelect>
                 </label>
               ) : null}
-              {plotType === "xy" ? (
+              {plotType === "xy" || plotType === "dose" ? (
                 <label className="grid gap-1.5 text-xs font-medium">
-                  X variable
+                  {plotType === "dose" ? "Dose / concentration" : "X variable"}
                   <NativeSelect
                     className="w-full"
                     value={xVariable}
@@ -1971,12 +2869,16 @@ export default function Home() {
                   </NativeSelect>
                 </label>
               ) : null}
-              {plotType === "columns" || plotType === "grouped" || plotType === "xy" ? (
+              {["columns", "grouped", "distribution", "paired", "xy", "dose", "pca"].includes(
+                plotType,
+              ) ? (
                 <label className="grid gap-1.5 text-xs font-medium">
                   {plotType === "grouped"
                     ? "X-axis groups"
                     : plotType === "columns"
                       ? "Column groups"
+                      : plotType === "paired"
+                        ? "Repeated conditions"
                       : "Group or colour"}
                   <NativeSelect
                     className="w-full"
@@ -2010,6 +2912,138 @@ export default function Home() {
                       ))}
                   </NativeSelect>
                 </label>
+              ) : null}
+              {plotType === "distribution" ? (
+                <label className="grid gap-1.5 text-xs font-medium">
+                  Distribution style
+                  <NativeSelect
+                    className="w-full"
+                    value={distributionMode}
+                    onChange={(event) =>
+                      setDistributionMode(event.target.value as DistributionMode)
+                    }
+                  >
+                    <NativeSelectOption value="violin">Violin with median and quartiles</NativeSelectOption>
+                    <NativeSelectOption value="box">Box and whiskers</NativeSelectOption>
+                  </NativeSelect>
+                </label>
+              ) : null}
+              {plotType === "paired" ? (
+                <label className="grid gap-1.5 text-xs font-medium">
+                  Subject / repeated-measure ID
+                  <NativeSelect
+                    className="w-full"
+                    value={subject}
+                    onChange={(event) => setSubject(event.target.value)}
+                  >
+                    <NativeSelectOption value="__none__">Select a subject ID</NativeSelectOption>
+                    {allColumns
+                      .filter((column) => column !== outcome && column !== group)
+                      .map((column) => (
+                        <NativeSelectOption key={column} value={column}>
+                          {column}
+                        </NativeSelectOption>
+                      ))}
+                  </NativeSelect>
+                </label>
+              ) : null}
+              {plotType === "dose" ? (
+                <label className="flex items-center gap-2 text-xs font-medium">
+                  <Checkbox
+                    checked={doseLogX}
+                    onCheckedChange={(checked) => setDoseLogX(Boolean(checked))}
+                  />
+                  Fit using log₁₀ dose values
+                </label>
+              ) : null}
+              {plotType === "pca" ? (
+                <>
+                  <label className="grid gap-1.5 text-xs font-medium">
+                    PCA variables (2–12)
+                    <select
+                      multiple
+                      className="min-h-32 rounded-lg border border-input bg-transparent p-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+                      value={pcaColumns}
+                      onChange={(event) =>
+                        setPcaColumns(
+                          [...event.target.selectedOptions]
+                            .map((option) => option.value)
+                            .slice(0, 12),
+                        )
+                      }
+                    >
+                      {numbers.map((column) => (
+                        <option key={column} value={column}>
+                          {column}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="grid gap-1.5 text-xs font-medium">
+                    Sample label
+                    <NativeSelect
+                      className="w-full"
+                      value={labelVariable}
+                      onChange={(event) => setLabelVariable(event.target.value)}
+                    >
+                      {allColumns.map((column) => (
+                        <NativeSelectOption key={column} value={column}>
+                          {column}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelect>
+                  </label>
+                </>
+              ) : null}
+              {plotType === "sets" ? (
+                <>
+                  <label className="grid gap-1.5 text-xs font-medium">
+                    Item / feature identifier
+                    <NativeSelect
+                      className="w-full"
+                      value={setItemVariable}
+                      onChange={(event) => setSetItemVariable(event.target.value)}
+                    >
+                      {allColumns.map((column) => (
+                        <NativeSelectOption key={column} value={column}>
+                          {column}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelect>
+                  </label>
+                  <label className="grid gap-1.5 text-xs font-medium">
+                    Set-membership column
+                    <NativeSelect
+                      className="w-full"
+                      value={setMembershipVariable}
+                      onChange={(event) => setSetMembershipVariable(event.target.value)}
+                    >
+                      {allColumns
+                        .filter((column) => column !== setItemVariable)
+                        .map((column) => (
+                          <NativeSelectOption key={column} value={column}>
+                            {column}
+                          </NativeSelectOption>
+                        ))}
+                    </NativeSelect>
+                  </label>
+                  <label className="grid gap-1.5 text-xs font-medium">
+                    Intersection view
+                    <NativeSelect
+                      className="w-full"
+                      value={setPlotMode}
+                      onChange={(event) => setSetPlotMode(event.target.value as SetPlotMode)}
+                    >
+                      <NativeSelectOption value="auto">Automatic — Venn up to 3 sets</NativeSelectOption>
+                      <NativeSelectOption value="venn">Venn diagram</NativeSelectOption>
+                      <NativeSelectOption value="upset">UpSet plot</NativeSelectOption>
+                    </NativeSelect>
+                  </label>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    Use long-format data: one item–set membership per row. Repeat an item on
+                    multiple rows when it belongs to multiple sets.
+                  </p>
+                </>
               ) : null}
               {plotType === "volcano" ? (
                 <>
@@ -2365,13 +3399,24 @@ export default function Home() {
                   />{" "}
                   Show grid
                 </label>
-                {plotType === "columns" || plotType === "grouped" ? (
+                {["columns", "grouped", "distribution"].includes(plotType) ? (
                   <label className="flex items-center gap-2">
                     <Checkbox
                       checked={showPoints}
                       onCheckedChange={(checked) => setShowPoints(Boolean(checked))}
                     />{" "}
                     Show individual observations
+                  </label>
+                ) : null}
+                {plotType === "columns" && analysis.postHoc.length ? (
+                  <label className="flex items-center gap-2">
+                    <Checkbox
+                      checked={showComparisonAnnotations}
+                      onCheckedChange={(checked) =>
+                        setShowComparisonAnnotations(Boolean(checked))
+                      }
+                    />{" "}
+                    Show selected post-test comparisons on graph
                   </label>
                 ) : null}
                 {plotType === "columns" || plotType === "grouped" ? (
@@ -2402,7 +3447,7 @@ export default function Home() {
                     </label>
                   </div>
                 ) : null}
-                {plotType !== "heatmap" && plotType !== "volcano" ? (
+                {["columns", "grouped", "xy"].includes(plotType) ? (
                   <label className="flex items-center gap-2">
                     <Checkbox
                       checked={logY && canUseLogY}
@@ -2893,7 +3938,16 @@ export default function Home() {
                       `${completeEntries.length} complete observations across ${summaries.length} groups`}
                     {plotType === "grouped" &&
                       `${completeEntries.length} observations across ${groupedLevels.length} X-axis groups and ${factor2Levels.length} datasets`}
+                    {plotType === "distribution" &&
+                      `${completeEntries.length} complete observations across ${distributionGroups.length} distributions`}
+                    {plotType === "paired" &&
+                      `${pairedSubjects.length} subjects across ${summaries.length} repeated conditions`}
                     {plotType === "xy" && `${relationshipPoints.length} complete XY pairs`}
+                    {plotType === "dose" &&
+                      `${doseSeries.reduce((sum, entry) => sum + entry.points.length, 0)} observations across ${doseSeries.length} dose–response series`}
+                    {plotType === "pca" &&
+                      `${pcaResult?.points.length ?? 0} complete samples across ${pcaColumns.length} selected variables`}
+                    {plotType === "sets" && `Exact item overlaps from ${setMembershipVariable}`}
                     {plotType === "heatmap" &&
                       `${activeHeatmapColumns.length} numeric variables${heatmapLinkage === "none" ? "" : ` · ${heatmapLinkage} row clustering`}`}
                     {plotType === "volcano" &&
@@ -2914,15 +3968,26 @@ export default function Home() {
               </CardHeader>
               <CardContent className="pt-5">
                 {plotType === "columns" ? (
-                  <ChartContainer
-                    config={chartConfig}
-                    className="mx-auto shrink-0 aspect-auto"
+                  <div
+                    className="relative mx-auto shrink-0"
                     style={{ width: plotWidth, height: plotHeight }}
                   >
-                    <ComposedChart
-                      data={summaries}
-                      margin={{ top: 22, right: 24, bottom: 52, left: 24 }}
+                    <ChartContainer
+                      config={chartConfig}
+                      className="h-full w-full shrink-0 aspect-auto"
                     >
+                      <ComposedChart
+                        data={summaries}
+                        margin={{
+                          top:
+                            showComparisonAnnotations && analysis.postHoc.length
+                              ? 92
+                              : 22,
+                          right: 24,
+                          bottom: 52,
+                          left: 24,
+                        }}
+                      >
                       {showGrid ? <CartesianGrid strokeDasharray="3 3" vertical={false} /> : null}
                       <XAxis
                         dataKey="group"
@@ -3012,8 +4077,17 @@ export default function Home() {
                           }}
                         />
                       ) : null}
-                    </ComposedChart>
-                  </ChartContainer>
+                      </ComposedChart>
+                    </ChartContainer>
+                    {showComparisonAnnotations ? (
+                      <ComparisonOverlay
+                        comparisons={analysis.postHoc}
+                        groups={summaries.map((summary) => summary.group)}
+                        width={plotWidth}
+                        fontSize={tickFontSize}
+                      />
+                    ) : null}
+                  </div>
                 ) : null}
 
                 {plotType === "grouped" ? (
@@ -3141,6 +4215,41 @@ export default function Home() {
                   )
                 ) : null}
 
+                {plotType === "distribution" ? (
+                  <DistributionPlot
+                    groups={distributionGroups.map((entry, index) => ({
+                      ...entry,
+                      color: seriesColor(index, entry.name),
+                    }))}
+                    mode={distributionMode}
+                    width={plotWidth}
+                    height={plotHeight}
+                    showPoints={showPoints}
+                    pointSize={pointSize}
+                    pointOpacity={pointOpacity}
+                    xLabel={displayXLabel}
+                    yLabel={displayYLabel}
+                    tickFontSize={tickFontSize}
+                    axisTitleFontSize={axisTitleFontSize}
+                  />
+                ) : null}
+
+                {plotType === "paired" ? (
+                  <PairedTrajectoryPlot
+                    groups={summaries.map((summary) => summary.group)}
+                    subjects={pairedSubjects}
+                    width={plotWidth}
+                    height={plotHeight}
+                    color={primaryColor}
+                    pointSize={pointSize}
+                    pointOpacity={pointOpacity}
+                    xLabel={displayXLabel}
+                    yLabel={displayYLabel}
+                    tickFontSize={tickFontSize}
+                    axisTitleFontSize={axisTitleFontSize}
+                  />
+                ) : null}
+
                 {plotType === "xy" ? (
                   <ChartContainer
                     config={chartConfig}
@@ -3244,6 +4353,48 @@ export default function Home() {
                       />
                     </ScatterChart>
                   </ChartContainer>
+                ) : null}
+
+                {plotType === "dose" ? (
+                  <DoseResponsePlot
+                    series={doseSeries.map((entry, index) => ({
+                      ...entry,
+                      color: seriesColor(index, entry.name),
+                    }))}
+                    width={plotWidth}
+                    height={plotHeight}
+                    pointSize={pointSize}
+                    pointOpacity={pointOpacity}
+                    xLabel={displayXLabel}
+                    yLabel={displayYLabel}
+                    tickFontSize={tickFontSize}
+                    axisTitleFontSize={axisTitleFontSize}
+                  />
+                ) : null}
+
+                {plotType === "pca" ? (
+                  <PcaPlot
+                    result={pcaResult}
+                    width={plotWidth}
+                    height={plotHeight}
+                    colors={pcaColourMap}
+                    pointSize={pointSize}
+                    pointOpacity={pointOpacity}
+                    tickFontSize={tickFontSize}
+                    axisTitleFontSize={axisTitleFontSize}
+                  />
+                ) : null}
+
+                {plotType === "sets" ? (
+                  <SetIntersectionPlot
+                    rows={rows}
+                    itemVariable={setItemVariable}
+                    setVariable={setMembershipVariable}
+                    mode={setPlotMode}
+                    width={plotWidth}
+                    height={plotHeight}
+                    tickFontSize={tickFontSize}
+                  />
                 ) : null}
 
                 {plotType === "heatmap" ? (
@@ -3525,7 +4676,11 @@ export default function Home() {
           </div>
 
           <div className="grid gap-5 lg:grid-cols-2">
-            <Card className="border-0 bg-card shadow-sm">
+            {!(["heatmap", "volcano", "sets", "pca", "dose"] as PlotType[]).includes(
+              plotType,
+            ) ? (
+              <>
+              <Card className="border-0 bg-card shadow-sm">
               <CardHeader>
                 <CardTitle>Statistical result</CardTitle>
                 <CardDescription>
@@ -3562,7 +4717,7 @@ export default function Home() {
                   <p className="text-sm text-muted-foreground">
                     Normality results and their interpretation are shown under Diagnostics.
                   </p>
-                ) : plotType === "heatmap" || plotType === "volcano" ? (
+                ) : ["heatmap", "volcano", "sets", "pca", "dose"].includes(plotType) ? (
                   <p className="text-sm leading-relaxed text-muted-foreground">
                     {suggestion.reason}
                   </p>
@@ -3640,7 +4795,9 @@ export default function Home() {
                   <strong>{outliers.size}</strong>
                 </div>
               </CardContent>
-            </Card>
+              </Card>
+              </>
+            ) : null}
           </div>
 
           {analysis.postHoc.length ? (
@@ -3732,7 +4889,7 @@ export default function Home() {
             </Card>
           ) : null}
 
-          {plotType === "columns" || plotType === "grouped" ? (
+          {["columns", "grouped", "distribution", "paired"].includes(plotType) ? (
             <Card className="border-0 bg-card shadow-sm">
               <CardHeader>
                 <div>
@@ -3792,7 +4949,7 @@ export default function Home() {
                 reference datasets; method-specific limitations still apply.
               </p>
               <p>
-                Version 1.0.5 · Updated 20 September 2026 ·{" "}
+                Version 1.1.0 · Updated 20 September 2026 ·{" "}
                 <a
                   className="font-medium text-primary underline"
                   href="https://cariacolab.com/contact/"

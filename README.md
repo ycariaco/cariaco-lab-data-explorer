@@ -4,9 +4,21 @@ Independent, static version of the Cariaco Lab Data Explorer. It does not use
 ChatGPT, the OpenAI API, a database, or an application server. Uploaded and
 pasted datasets are processed in the visitor's browser.
 
-Version 1.0.1, updated 18 September 2026. See [VALIDATION.md](VALIDATION.md)
+Version 1.1.0, updated 20 September 2026. See [VALIDATION.md](VALIDATION.md)
 for the implemented-method assumptions, the reproducible R benchmark, and the
 remaining limitations.
+
+## Included visualization tools
+
+- Column and grouped plots with individual observations, error bars, and selected post-test annotations
+- Box-and-whisker and violin distribution plots
+- Paired/repeated-measure trajectory plots
+- XY plots with correlations and regression lines
+- Exploratory four-parameter dose-response curves
+- Standardized PCA score plots with loadings
+- Correlation heatmaps with hierarchical row clustering
+- Volcano plots with independent Up, Down, and NS colours and selected labels
+- Venn diagrams for two or three sets and UpSet plots for larger intersections
 
 ## Local development
 
