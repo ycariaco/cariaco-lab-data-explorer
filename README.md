@@ -4,7 +4,7 @@ Independent, static version of the Cariaco Lab Data Explorer. It does not use
 ChatGPT, the OpenAI API, a database, or an application server. Uploaded and
 pasted datasets are processed in the visitor's browser.
 
-Version 1.1.5, updated 20 September 2026. See [VALIDATION.md](VALIDATION.md)
+Version 1.2.0, updated 20 September 2026. See [VALIDATION.md](VALIDATION.md)
 for the implemented-method assumptions, the reproducible R benchmark, and the
 remaining limitations.
 
@@ -39,14 +39,19 @@ The deployable static website is generated in `dist/`.
 
 ## Reproduce the statistical benchmark
 
-The benchmark requires R 4.6.1 with `car`, `jsonlite`, `nlme`, and `rstatix`,
-plus Python 3 for the comparison report.
+The main benchmark requires R 4.6.1 with `car`, `jsonlite`, `nlme`, and
+`rstatix`, plus Python 3 for the comparison report. The extended normality
+audit also uses SciPy 1.13.1.
 
 ```bash
 mkdir -p validation/results
 pnpm validate:app
 pnpm validate:r
 pnpm validate:compare
+pnpm audit:app
+pnpm audit:r
+PYTHONPATH=/path/to/scipy python3 validation/audit-scipy.py
+pnpm audit:compare
 ```
 
 This is a reference benchmark, not an independent or regulated software

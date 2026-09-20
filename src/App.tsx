@@ -68,7 +68,9 @@ import {
   randomInterceptModel,
   sampleVariance,
   spearmanCorrelation,
+  studentTCritical95,
   welchTTest,
+  welchOneWayAnova,
   wilcoxonSignedRankTest,
 } from "@/lib/statistics";
 
@@ -91,6 +93,7 @@ type TestChoice =
   | "mannwhitney"
   | "wilcoxon"
   | "oneway"
+  | "welch-anova"
   | "kruskal"
   | "friedman"
   | "twoway"
@@ -364,7 +367,14 @@ function parseDelimitedText(text: string): DataRow[] {
       .map((line) => line.trim())
       .filter(Boolean)
       .map((line) => line.split(/\s+/));
-    const headers = records[0]?.map((header) => header.trim()) ?? [];
+    const headerCounts = new Map<string, number>();
+    const headers =
+      records[0]?.map((header, index) => {
+        const base = header.trim() || `column_${index + 1}`;
+        const count = (headerCounts.get(base) ?? 0) + 1;
+        headerCounts.set(base, count);
+        return count === 1 ? base : `${base}_${count}`;
+      }) ?? [];
     if (headers.length < 2) return [];
     return records.slice(1).flatMap((record) => {
       if (!record.some(Boolean)) return [];
@@ -405,7 +415,13 @@ function parseDelimitedText(text: string): DataRow[] {
   row.push(field.trim());
   if (row.some(Boolean)) records.push(row);
   if (records.length < 2) return [];
-  const headers = records[0].map((header, index) => header || `column_${index + 1}`);
+  const headerCounts = new Map<string, number>();
+  const headers = records[0].map((header, index) => {
+    const base = header || `column_${index + 1}`;
+    const count = (headerCounts.get(base) ?? 0) + 1;
+    headerCounts.set(base, count);
+    return count === 1 ? base : `${base}_${count}`;
+  });
   return records
     .slice(1)
     .map((values) =>
@@ -441,6 +457,44 @@ function categoricalColumns(rows: DataRow[]) {
     const unique = new Set(values);
     return unique.size >= 2 && unique.size <= Math.min(20, Math.max(2, rows.length / 2));
   });
+}
+
+function likelySubjectColumn(columns: string[]) {
+  return (
+    columns.find((column) =>
+      /(^|[_\s-])(subject|participant|patient|donor|animal|individual)([_\s-]|$)/i.test(
+        column,
+      ),
+    ) ??
+    columns.find((column) => /sample.*id|^id$/i.test(column)) ??
+    ""
+  );
+}
+
+function likelySetItemColumn(columns: string[]) {
+  return (
+    columns.find((column) => /^item([_\s-]?id)?$/i.test(column)) ??
+    columns.find((column) =>
+      /^(feature|gene|protein|metabolite|molecule)([_\s-]?id)?$/i.test(column),
+    ) ??
+    columns.find((column) => /item|feature|gene|protein|metabolite|molecule/i.test(column)) ??
+    columns[0] ??
+    ""
+  );
+}
+
+function likelySetMembershipColumn(columns: string[], itemColumn: string) {
+  return (
+    columns.find(
+      (column) =>
+        column !== itemColumn && /(^|[_\s-])(set|list|membership)([_\s-]|$)/i.test(column),
+    ) ??
+    columns.find(
+      (column) =>
+        column !== itemColumn && /pathway|category|collection|signature/i.test(column),
+    ) ??
+    ""
+  );
 }
 
 function formatNumber(value: number, digits = 3) {
@@ -487,7 +541,7 @@ function adjustPairwiseComparisons(
         : adjustment === "bonferroni"
           ? pValues.map((p) => Math.min(1, p * pValues.length))
           : adjustment === "sidak"
-            ? pValues.map((p) => 1 - (1 - p) ** pValues.length)
+            ? pValues.map((p) => -Math.expm1(pValues.length * Math.log1p(-p)))
             : adjustment === "bh-fdr"
               ? benjaminiHochbergAdjustedPValues(pValues)
               : pValues;
@@ -686,7 +740,7 @@ function hierarchicalHeatmapClustering(
     const second = clusters[bestSecond];
     const merged: HeatmapClusterNode = {
       order: orientedMerge(first.order, second.order),
-      distance: bestDistance,
+      distance: Number.isFinite(bestDistance) ? bestDistance : 1,
       left: first,
       right: second,
     };
@@ -708,9 +762,12 @@ function buildHeatmapDendrogram(
   const rowPositions = new Map(
     order.map((rowIndex, position) => [rowIndex, top + (position + 0.5) * cellSize]),
   );
-  const maximumDistance = root.distance || 1;
-  const xForDistance = (distance: number) =>
-    width - (Math.max(0, distance) / maximumDistance) * (width - 8);
+  const maximumDistance =
+    Number.isFinite(root.distance) && root.distance > 0 ? root.distance : 1;
+  const xForDistance = (distance: number) => {
+    const finiteDistance = Number.isFinite(distance) ? Math.max(0, distance) : maximumDistance;
+    return width - (finiteDistance / maximumDistance) * (width - 8);
+  };
 
   const visit = (node: HeatmapClusterNode): { x: number; y: number } => {
     if (node.leaf !== undefined) {
@@ -1094,7 +1151,11 @@ function fourParameterLogistic(x: number, parameters: number[]) {
 }
 
 function fitFourParameterLogistic(points: Array<{ x: number; y: number }>): DoseFit | null {
-  if (points.length < 5) return null;
+  if (
+    points.length < 5 ||
+    new Set(points.map((point) => point.x)).size < 5 ||
+    sampleVariance(points.map((point) => point.y)) <= 0
+  ) return null;
   const sorted = [...points].sort((a, b) => a.x - b.x);
   const xValues = sorted.map((point) => point.x);
   const yValues = sorted.map((point) => point.y);
@@ -1613,7 +1674,7 @@ function DoseResponsePlot({
           <TableHeader><TableRow><TableHead>Series</TableHead><TableHead>Bottom</TableHead><TableHead>Top</TableHead><TableHead>Midpoint</TableHead><TableHead>Hill slope</TableHead><TableHead>R²</TableHead></TableRow></TableHeader>
           <TableBody>
             {series.map((entry) => (
-              <TableRow key={entry.name}><TableCell className="font-medium">{entry.name}</TableCell><TableCell>{entry.fit ? formatNumber(entry.fit.bottom) : "Insufficient fit"}</TableCell><TableCell>{entry.fit ? formatNumber(entry.fit.top) : "—"}</TableCell><TableCell>{entry.fit ? formatNumber(entry.fit.midpoint) : "—"}</TableCell><TableCell>{entry.fit ? formatNumber(entry.fit.hill) : "—"}</TableCell><TableCell>{entry.fit ? formatNumber(entry.fit.rSquared) : "—"}</TableCell></TableRow>
+              <TableRow key={entry.name}><TableCell className="font-medium">{entry.name}</TableCell><TableCell>{entry.fit ? formatNumber(entry.fit.bottom) : "Need ≥5 distinct doses and variable responses"}</TableCell><TableCell>{entry.fit ? formatNumber(entry.fit.top) : "—"}</TableCell><TableCell>{entry.fit ? formatNumber(entry.fit.midpoint) : "—"}</TableCell><TableCell>{entry.fit ? formatNumber(entry.fit.hill) : "—"}</TableCell><TableCell>{entry.fit ? formatNumber(entry.fit.rSquared) : "—"}</TableCell></TableRow>
             ))}
           </TableBody>
         </Table>
@@ -2046,9 +2107,14 @@ export default function Home() {
       grouped.set(entry.group, [...(grouped.get(entry.group) ?? []), entry.value]),
     );
     return [...grouped.entries()].map(([key, values]) => {
-      const sd = Math.sqrt(sampleVariance(values));
-      const sem = sd / Math.sqrt(values.length);
-      const errorValue = errorType === "sd" ? sd : errorType === "ci95" ? 1.96 * sem : sem;
+      const sd = values.length > 1 ? Math.sqrt(sampleVariance(values)) : Number.NaN;
+      const sem = values.length > 1 ? sd / Math.sqrt(values.length) : Number.NaN;
+      const errorValue =
+        errorType === "sd"
+          ? sd
+          : errorType === "ci95"
+            ? studentTCritical95(values.length - 1) * sem
+            : sem;
       return {
         group: key,
         n: values.length,
@@ -2058,7 +2124,7 @@ export default function Home() {
         median: median(values),
         min: Math.min(...values),
         max: Math.max(...values),
-        error: errorValue,
+        error: Number.isFinite(errorValue) ? errorValue : 0,
       };
     });
   }, [completeEntries, errorType]);
@@ -2072,9 +2138,14 @@ export default function Home() {
     });
     return [...cells.entries()].map(([key, values]) => {
       const [groupName, factorName] = key.split("\u0000");
-      const sd = Math.sqrt(sampleVariance(values));
-      const sem = sd / Math.sqrt(values.length);
-      const errorValue = errorType === "sd" ? sd : errorType === "ci95" ? 1.96 * sem : sem;
+      const sd = values.length > 1 ? Math.sqrt(sampleVariance(values)) : Number.NaN;
+      const sem = values.length > 1 ? sd / Math.sqrt(values.length) : Number.NaN;
+      const errorValue =
+        errorType === "sd"
+          ? sd
+          : errorType === "ci95"
+            ? studentTCritical95(values.length - 1) * sem
+            : sem;
       return {
         group: groupName,
         factor2: factorName,
@@ -2085,7 +2156,7 @@ export default function Home() {
         median: median(values),
         min: Math.min(...values),
         max: Math.max(...values),
-        error: errorValue,
+        error: Number.isFinite(errorValue) ? errorValue : 0,
       };
     });
   }, [completeEntries, errorType]);
@@ -2144,7 +2215,52 @@ export default function Home() {
 
   const residuals = useMemo(() => {
     if (plotType === "xy" && regression) return regression.residuals;
-    if (plotType === "columns" || plotType === "grouped") {
+    if (plotType === "columns" || plotType === "grouped" || plotType === "paired") {
+      if (subject !== "__none__" && factor2 === "__none__") {
+        const bySubject = new Map<string, Map<string, number[]>>();
+        completeEntries.forEach((entry) => {
+          if (!entry.subject) return;
+          const byGroup = bySubject.get(entry.subject) ?? new Map<string, number[]>();
+          byGroup.set(entry.group, [...(byGroup.get(entry.group) ?? []), entry.value]);
+          bySubject.set(entry.subject, byGroup);
+        });
+        const repeatedAcrossGroups = [...bySubject.values()].some(
+          (byGroup) => byGroup.size > 1,
+        );
+        if (repeatedAcrossGroups && summaries.length === 2) {
+          const [firstGroup, secondGroup] = summaries.map((summary) => summary.group);
+          return [...bySubject.values()].flatMap((byGroup) => {
+            const first = byGroup.get(firstGroup);
+            const second = byGroup.get(secondGroup);
+            return first?.length && second?.length
+              ? [average(first) - average(second)]
+              : [];
+          });
+        }
+        if (repeatedAcrossGroups && summaries.length > 2) {
+          const usable = completeEntries.filter((entry) => entry.subject);
+          const grandMean = usable.length
+            ? average(usable.map((entry) => entry.value))
+            : 0;
+          const subjectValues = new Map<string, number[]>();
+          usable.forEach((entry) =>
+            subjectValues.set(entry.subject, [
+              ...(subjectValues.get(entry.subject) ?? []),
+              entry.value,
+            ]),
+          );
+          const groupMeans = new Map(
+            summaries.map((summary) => [summary.group, summary.mean]),
+          );
+          return usable.map(
+            (entry) =>
+              entry.value -
+              average(subjectValues.get(entry.subject) ?? [entry.value]) -
+              (groupMeans.get(entry.group) ?? grandMean) +
+              grandMean,
+          );
+        }
+      }
       const means = new Map(
         (plotType === "grouped" ? groupedSummaries : summaries).map((summary) => [
           "factor2" in summary ? `${summary.group}\u0000${summary.factor2}` : summary.group,
@@ -2162,7 +2278,7 @@ export default function Home() {
     const values = completeEntries.map((entry) => entry.value);
     const center = values.length ? average(values) : 0;
     return values.map((value) => value - center);
-  }, [plotType, regression, summaries, groupedSummaries, completeEntries]);
+  }, [plotType, regression, summaries, groupedSummaries, completeEntries, subject, factor2]);
 
   const diagnostics = useMemo(
     () => normalityTests(residuals, normalityEngine),
@@ -2256,7 +2372,9 @@ export default function Home() {
     const caution =
       nonNormal || outliers.size > 0
         ? " Diagnostics indicate non-normality or potential outliers; inspect the data and consider a robust or non-parametric sensitivity analysis."
-        : " Residual diagnostics do not show a clear normality problem.";
+        : diagnostics.length
+          ? " Residual diagnostics do not show a clear normality problem."
+          : " Normality could not be assessed from these data; choose the final method using the study design, prior knowledge, and graphical checks.";
     if (plotType === "sets") {
       return {
         test: "auto" as TestChoice,
@@ -2282,7 +2400,7 @@ export default function Home() {
       };
     }
     if (plotType === "xy") {
-      return nonNormal || outliers.size
+      return nonNormal
         ? {
             test: "spearman" as TestChoice,
             title: "Spearman correlation",
@@ -2291,7 +2409,7 @@ export default function Home() {
         : {
             test: "pearson" as TestChoice,
             title: "Pearson correlation",
-            reason: `Two continuous variables with an approximately linear relationship.${caution}`,
+            reason: `Pearson correlation is appropriate if the scatter is approximately linear and residual variance is reasonably stable.${caution}`,
           };
     }
     if (plotType === "heatmap") {
@@ -2317,6 +2435,14 @@ export default function Home() {
           "A grouped plot needs an X-axis grouping variable and a second categorical variable for the side-by-side datasets.",
       };
     }
+    if (factor2 !== "__none__" && hasRepeatedSubjects) {
+      return {
+        test: "auto" as TestChoice,
+        title: "Repeated two-factor model not available",
+        reason:
+          "Subject IDs repeat across factor combinations. A standard two-way ANOVA would treat these observations as independent. Fit a repeated-measures or mixed-effects factorial model in R, SAS, SPSS, Prism, or equivalent software.",
+      };
+    }
     if (factor2 !== "__none__") {
       return {
         test: "twoway" as TestChoice,
@@ -2325,7 +2451,7 @@ export default function Home() {
       };
     }
     if (summaries.length === 2 && hasRepeatedSubjects) {
-      return nonNormal || outliers.size
+      return nonNormal
         ? {
             test: "wilcoxon" as TestChoice,
             title: "Wilcoxon signed-rank test",
@@ -2338,7 +2464,7 @@ export default function Home() {
           };
     }
     if (summaries.length > 2 && hasRepeatedSubjects) {
-      return nonNormal || outliers.size
+      return nonNormal
         ? {
             test: "friedman" as TestChoice,
             title: "Friedman test",
@@ -2351,7 +2477,7 @@ export default function Home() {
           };
     }
     if (summaries.length === 2) {
-      return nonNormal || outliers.size
+      return nonNormal
         ? {
             test: "mannwhitney" as TestChoice,
             title: "Mann–Whitney U test",
@@ -2363,16 +2489,16 @@ export default function Home() {
             reason: `Two independent groups are selected; Welch's version does not require equal variances.${caution}`,
           };
     }
-    return nonNormal || outliers.size
+    return nonNormal
       ? {
           test: "kruskal" as TestChoice,
           title: "Kruskal–Wallis test",
           reason: `More than two independent groups with distributional concerns.${caution}`,
         }
       : {
-          test: "oneway" as TestChoice,
-          title: "One-way ANOVA",
-          reason: `More than two independent groups are selected.${caution}`,
+          test: "welch-anova" as TestChoice,
+          title: "Welch's one-way ANOVA",
+          reason: `More than two independent groups are selected. Welch's version does not require equal group variances.${caution}`,
         };
   }, [diagnostics, outliers, plotType, summaries.length, hasRepeatedSubjects, factor2]);
 
@@ -2467,6 +2593,11 @@ export default function Home() {
       if (postHocEnabled && groups.length > 2) {
         postHoc = pairwiseWelchPostHoc(groups.map(([name, values]) => ({ name, values })));
       }
+    } else if (selectedTest === "welch-anova") {
+      result = welchOneWayAnova(groups.map(([, values]) => values));
+      if (postHocEnabled && groups.length > 2) {
+        postHoc = pairwiseWelchPostHoc(groups.map(([name, values]) => ({ name, values })));
+      }
     } else if (selectedTest === "kruskal") {
       result = kruskalWallisTest(groups.map(([, values]) => values));
       if (postHocEnabled && groups.length > 2) {
@@ -2523,10 +2654,11 @@ export default function Home() {
     } else if (selectedTest === "spearman") {
       result = spearmanCorrelation(relationshipPoints.map((point) => [point.x, point.y]));
     } else if (selectedTest === "mixed" && subject !== "__none__") {
+      const repeatedEntries = completeEntries.filter((entry) => entry.subject);
       result = randomInterceptModel(
-        completeEntries.map((entry) => entry.value),
-        completeEntries.map((entry) => entry.group),
-        completeEntries.map((entry) => entry.subject),
+        repeatedEntries.map((entry) => entry.value),
+        repeatedEntries.map((entry) => entry.group),
+        repeatedEntries.map((entry) => entry.subject),
       );
       if (postHocEnabled && groups.length > 2) postHoc = pairedPostHoc("paired");
     }
@@ -2926,17 +3058,16 @@ export default function Home() {
     const likelyOutcome =
       nextNumbers.find((column) => !/dose|time|id/i.test(column)) ?? nextNumbers[0];
     const likelyP =
-      nextNumbers.find((column) => /(^p$|p[_-]?value|pval|adj.*p)/i.test(column)) ?? "";
+      nextNumbers.find((column) =>
+        /(^p$|p[_-]?value|pval|adj.*p|fdr|q[_-]?value)/i.test(column),
+      ) ?? "";
     const likelyEffect =
       nextNumbers.find((column) => /log2|effect|fold/i.test(column)) ?? nextNumbers[0];
     const likelyLabel =
-      nextColumns.find((column) =>
-        /gene|protein|metabolite|feature|sample|name|id/i.test(column),
-      ) ?? nextColumns[0];
-    const likelySubject =
-      nextColumns.find((column) =>
-        /subject|participant|patient|donor|animal|individual|sample.*id|^id$/i.test(column),
-      ) ?? "";
+      nextColumns.find((column) => /gene|protein|metabolite|feature|molecule/i.test(column)) ??
+      nextColumns.find((column) => /sample|name|id/i.test(column)) ??
+      nextColumns[0];
+    const likelySubject = likelySubjectColumn(nextColumns);
     const likelyGroup =
       nextCategories.find((column) =>
         /condition|treatment|time|visit|period|stage|group|phase/i.test(column),
@@ -2944,6 +3075,10 @@ export default function Home() {
       nextCategories.find((column) => column !== likelySubject) ??
       nextCategories[0] ??
       "__none__";
+    const likelySetItem = likelySetItemColumn(nextColumns);
+    const likelySetMembership =
+      likelySetMembershipColumn(nextColumns, likelySetItem) ||
+      (likelyGroup === likelySetItem ? "" : likelyGroup);
     setRows(nextRows);
     setFileName(nextName);
     if (syncEditor) setDataText(rowsToTabDelimited(nextRows));
@@ -2957,8 +3092,8 @@ export default function Home() {
     setLabelVariable(likelyLabel);
     setHeatmapColumns(nextNumbers.slice(0, 8));
     setPcaColumns(nextNumbers.slice(0, 8));
-    setSetItemVariable(likelyLabel);
-    setSetMembershipVariable(likelyGroup === "__none__" ? "" : likelyGroup);
+    setSetItemVariable(likelySetItem);
+    setSetMembershipVariable(likelySetMembership === "__none__" ? "" : likelySetMembership);
     setPlotTitle("");
     setXLabel("");
     setYLabel("");
@@ -2976,12 +3111,22 @@ export default function Home() {
     }
     const nextCategories = categoricalColumns(parsed);
     const nextColumns = Object.keys(parsed[0]);
+    const headersChanged = nextColumns.join("\u0000") !== allColumns.join("\u0000");
+    const firstLivePaste = fileName !== "Live pasted data";
     const likelyOutcome =
       nextNumbers.find((column) => !/dose|time|id/i.test(column)) ?? nextNumbers[0];
-    const likelySubject =
-      nextColumns.find((column) =>
-        /subject|participant|patient|donor|animal|individual|sample.*id|^id$/i.test(column),
+    const likelyP =
+      nextNumbers.find((column) =>
+        /(^p$|p[_-]?value|pval|adj.*p|fdr|q[_-]?value)/i.test(column),
       ) ?? "";
+    const likelyEffect =
+      nextNumbers.find((column) => /log2|log_?2|effect|fold|estimate/i.test(column)) ??
+      nextNumbers[0];
+    const likelyLabel =
+      nextColumns.find((column) => /gene|protein|metabolite|feature|molecule/i.test(column)) ??
+      nextColumns.find((column) => /sample|name|id/i.test(column)) ??
+      nextColumns[0];
+    const likelySubject = likelySubjectColumn(nextColumns);
     const likelyGroup =
       nextCategories.find((column) =>
         /condition|treatment|time|visit|period|stage|group|phase/i.test(column),
@@ -2989,6 +3134,10 @@ export default function Home() {
       nextCategories.find((column) => column !== likelySubject) ??
       nextCategories[0] ??
       "__none__";
+    const likelySetItem = likelySetItemColumn(nextColumns);
+    const likelySetMembership =
+      likelySetMembershipColumn(nextColumns, likelySetItem) ||
+      (likelyGroup === likelySetItem ? "" : likelyGroup);
     setRows(parsed);
     setFileName("Live pasted data");
     setOutcome((current) => (nextNumbers.includes(current) ? current : likelyOutcome));
@@ -3012,13 +3161,17 @@ export default function Home() {
         ? current
         : (likelySubject || "__none__"),
     );
-    setEffectVariable((current) => (nextNumbers.includes(current) ? current : nextNumbers[0]));
-    setPVariable((current) =>
-      nextNumbers.includes(current)
-        ? current
-        : (nextNumbers.find((column) => /(^p$|p[_-]?value|pval|adj.*p)/i.test(column)) ?? ""),
+    setEffectVariable((current) =>
+      firstLivePaste || headersChanged || !nextNumbers.includes(current) ? likelyEffect : current,
     );
-    setLabelVariable((current) => (nextColumns.includes(current) ? current : nextColumns[0]));
+    setPVariable((current) =>
+      !firstLivePaste && !headersChanged && nextNumbers.includes(current)
+        ? current
+        : likelyP,
+    );
+    setLabelVariable((current) =>
+      firstLivePaste || headersChanged || !nextColumns.includes(current) ? likelyLabel : current,
+    );
     setHeatmapColumns((current) => {
       const retained = current.filter((column) => nextNumbers.includes(column));
       return retained.length >= 2 ? retained : nextNumbers.slice(0, 8);
@@ -3027,9 +3180,15 @@ export default function Home() {
       const retained = current.filter((column) => nextNumbers.includes(column));
       return retained.length >= 2 ? retained : nextNumbers.slice(0, 8);
     });
-    setSetItemVariable((current) => (nextColumns.includes(current) ? current : nextColumns[0]));
+    setSetItemVariable((current) =>
+      firstLivePaste || headersChanged || !nextColumns.includes(current)
+        ? likelySetItem
+        : current,
+    );
     setSetMembershipVariable((current) =>
-      nextCategories.includes(current) ? current : (nextCategories[0] ?? ""),
+      !firstLivePaste && !headersChanged && nextColumns.includes(current)
+        ? current
+        : likelySetMembership,
     );
     setError("");
   }
@@ -3078,8 +3237,7 @@ export default function Home() {
     }
     if (nextPlot === "paired") {
       const suggestedSubject =
-        allColumns.find((column) => /subject|donor|patient|animal|sample.*id|^id$/i.test(column)) ??
-        categories.find((column) => column !== group);
+        likelySubjectColumn(allColumns) || categories.find((column) => column !== group);
       const suggestedCondition =
         categories.find((column) =>
           /condition|treatment|time|visit|period|stage|group|phase/i.test(column),
@@ -3099,9 +3257,15 @@ export default function Home() {
       if (suggestedDose) setXVariable(suggestedDose);
     }
     if (nextPlot === "sets") {
-      if (!allColumns.includes(setItemVariable)) setSetItemVariable(labelVariable);
-      if (!categories.includes(setMembershipVariable)) {
-        setSetMembershipVariable(categories[0] ?? "");
+      const suggestedItem = likelySetItemColumn(allColumns);
+      const suggestedMembership = likelySetMembershipColumn(allColumns, suggestedItem);
+      if (!allColumns.includes(setItemVariable) || suggestedItem !== allColumns[0]) {
+        setSetItemVariable(suggestedItem || labelVariable);
+      }
+      if (!allColumns.includes(setMembershipVariable) || suggestedMembership) {
+        setSetMembershipVariable(
+          suggestedMembership || categories.find((column) => column !== suggestedItem) || "",
+        );
       }
     }
   }
@@ -4053,7 +4217,7 @@ export default function Home() {
                   >
                     <NativeSelectOption value="sem">SEM</NativeSelectOption>
                     <NativeSelectOption value="sd">SD</NativeSelectOption>
-                    <NativeSelectOption value="ci95">Approx. 95% CI</NativeSelectOption>
+                  <NativeSelectOption value="ci95">95% CI (t distribution)</NativeSelectOption>
                   </NativeSelect>
                 </label>
               ) : null}
@@ -4302,6 +4466,9 @@ export default function Home() {
                     Wilcoxon paired (non-parametric)
                   </NativeSelectOption>
                   <NativeSelectOption value="oneway">One-way ANOVA</NativeSelectOption>
+                  <NativeSelectOption value="welch-anova">
+                    Welch&apos;s one-way ANOVA
+                  </NativeSelectOption>
                   <NativeSelectOption value="kruskal">
                     Kruskal–Wallis (non-parametric)
                   </NativeSelectOption>
@@ -4447,7 +4614,9 @@ export default function Home() {
                             ? "Paired Wilcoxon tests follow the Friedman analysis."
                             : selectedTest === "mixed"
                               ? "Paired t-tests compare repeated conditions."
-                              : "Pairwise Welch tests compare independent groups."}{" "}
+                              : selectedTest === "oneway"
+                                ? "Pairwise Welch tests are shown, but classical ANOVA itself assumes equal variances."
+                                : "Pairwise Welch tests compare independent groups."}{" "}
                         Results use {postHocAdjustmentLabel} adjustment.
                       </p>
                     </>
@@ -4473,25 +4642,30 @@ export default function Home() {
                   </NativeSelect>
                 </label>
               ) : null}
-              <label className="grid gap-1.5 text-xs font-medium">
-                Subject / repeated-measure ID
-                <NativeSelect
-                  className="w-full"
-                  value={subject}
-                  onChange={(event) => setSubject(event.target.value)}
-                >
-                  <NativeSelectOption value="__none__">
-                    None / independent samples
-                  </NativeSelectOption>
-                  {categories
-                    .filter((column) => column !== group && column !== factor2)
-                    .map((column) => (
-                      <NativeSelectOption key={column} value={column}>
-                        {column}
-                      </NativeSelectOption>
-                    ))}
-                </NativeSelect>
-              </label>
+              {plotType !== "paired" ? (
+                <label className="grid gap-1.5 text-xs font-medium">
+                  Subject / repeated-measure ID
+                  <NativeSelect
+                    className="w-full"
+                    value={subject}
+                    onChange={(event) => setSubject(event.target.value)}
+                  >
+                    <NativeSelectOption value="__none__">
+                      None / independent samples
+                    </NativeSelectOption>
+                    {allColumns
+                      .filter(
+                        (column) =>
+                          column !== outcome && column !== group && column !== factor2,
+                      )
+                      .map((column) => (
+                        <NativeSelectOption key={column} value={column}>
+                          {column}
+                        </NativeSelectOption>
+                      ))}
+                  </NativeSelect>
+                </label>
+              ) : null}
               <label className="grid gap-1.5 text-xs font-medium">
                 Outlier flagging
                 <NativeSelect
@@ -5382,7 +5556,7 @@ export default function Home() {
               <CardHeader>
                 <CardTitle>Diagnostics</CardTitle>
                 <CardDescription>
-                  Shapiro–Wilk and, when n ≥ 8, D&apos;Agostino–Pearson K² use model residuals.
+                  Shapiro–Wilk and, when n ≥ 20, D&apos;Agostino–Pearson K² use model residuals.
                   Outliers are flagged, not removed.
                 </CardDescription>
               </CardHeader>
@@ -5582,7 +5756,7 @@ export default function Home() {
                 reference datasets; method-specific limitations still apply.
               </p>
               <p>
-                Version 1.1.5 · Updated 20 September 2026 ·{" "}
+                Version 1.2.0 · Updated 20 September 2026 ·{" "}
                 <a
                   className="font-medium text-primary underline"
                   href="https://cariacolab.com/contact/"

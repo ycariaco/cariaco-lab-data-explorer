@@ -1,0 +1,10 @@
+{
+  "welch_rejects_singleton": true,
+  "paired_rejects_two_pairs": true,
+  "constant_welch_anova_rejected": true,
+  "constant_correlation_rejected": true,
+  "incomplete_friedman_rejected": true,
+  "no_repeated_subject_mixed_rejected": true,
+  "infinite_t_tail_is_zero": true,
+  "infinite_f_tail_is_zero": true
+}

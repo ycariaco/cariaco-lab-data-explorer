@@ -1,6 +1,6 @@
 {
   "name": "cariaco-lab-data-explorer",
-  "version": "1.1.5",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -13,7 +13,11 @@
     "format": "oxfmt",
     "validate:app": "node --experimental-strip-types validation/generate-app-results.mjs",
     "validate:r": "Rscript validation/generate-r-results.R validation",
-    "validate:compare": "python3 validation/compare-results.py"
+    "validate:compare": "python3 validation/compare-results.py",
+    "audit:app": "node --experimental-strip-types validation/audit-app.mjs",
+    "audit:r": "Rscript validation/audit-r.R validation",
+    "audit:compare": "python3 validation/compare-audit.py",
+    "audit": "pnpm audit:app && pnpm audit:r && pnpm audit:compare"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",

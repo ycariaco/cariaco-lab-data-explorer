@@ -188,15 +188,35 @@ function regularizedBeta(x: number, a: number, b: number) {
 }
 
 export function studentTTwoSidedP(t: number, degreesOfFreedom: number) {
-  if (!Number.isFinite(t) || degreesOfFreedom <= 0) return Number.NaN;
+  if (Number.isNaN(t) || degreesOfFreedom <= 0) return Number.NaN;
+  if (!Number.isFinite(t)) return 0;
   const x = degreesOfFreedom / (degreesOfFreedom + t * t);
   return regularizedBeta(x, degreesOfFreedom / 2, 0.5);
 }
 
-export function fRightTailP(f: number, df1: number, df2: number) {
-  if (!Number.isFinite(f) || f < 0 || df1 <= 0 || df2 <= 0) {
+export function studentTCritical95(degreesOfFreedom: number) {
+  if (!Number.isFinite(degreesOfFreedom) || degreesOfFreedom <= 0) {
     return Number.NaN;
   }
+  let lower = 0;
+  let upper = 16;
+  while (studentTTwoSidedP(upper, degreesOfFreedom) > 0.05) upper *= 2;
+  for (let iteration = 0; iteration < 80; iteration += 1) {
+    const midpoint = (lower + upper) / 2;
+    if (studentTTwoSidedP(midpoint, degreesOfFreedom) > 0.05) {
+      lower = midpoint;
+    } else {
+      upper = midpoint;
+    }
+  }
+  return (lower + upper) / 2;
+}
+
+export function fRightTailP(f: number, df1: number, df2: number) {
+  if (Number.isNaN(f) || f < 0 || df1 <= 0 || df2 <= 0) {
+    return Number.NaN;
+  }
+  if (!Number.isFinite(f)) return 0;
   const x = df2 / (df2 + df1 * f);
   return regularizedBeta(x, df2 / 2, df1 / 2);
 }
@@ -304,6 +324,49 @@ export function oneWayAnova(groups: number[][]): TestResult | null {
     degreesOfFreedom: `${df1}, ${df2}`,
     p: fRightTailP(f, df1, df2),
     detail: `${valid.length} groups; ${totalN} complete observations`,
+  };
+}
+
+export function welchOneWayAnova(groups: number[][]): TestResult | null {
+  const valid = groups.filter((values) => values.length >= 2);
+  if (valid.length < 2) return null;
+  const variances = valid.map(sampleVariance);
+  if (variances.some((variance) => !Number.isFinite(variance) || variance <= 0)) {
+    return null;
+  }
+  const weights = valid.map(
+    (values, index) => values.length / variances[index],
+  );
+  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
+  if (!Number.isFinite(weightTotal) || weightTotal <= 0) return null;
+  const weightedMean = valid.reduce(
+    (sum, values, index) => sum + weights[index] * average(values),
+    0,
+  ) / weightTotal;
+  const groupCount = valid.length;
+  const numerator = valid.reduce(
+    (sum, values, index) =>
+      sum + weights[index] * (average(values) - weightedMean) ** 2,
+    0,
+  ) / (groupCount - 1);
+  const correctionTerm = valid.reduce(
+    (sum, values, index) =>
+      sum + (1 - weights[index] / weightTotal) ** 2 / (values.length - 1),
+    0,
+  );
+  if (!Number.isFinite(correctionTerm) || correctionTerm <= 0) return null;
+  const correction =
+    1 + (2 * (groupCount - 2) * correctionTerm) / (groupCount ** 2 - 1);
+  const f = numerator / correction;
+  const df1 = groupCount - 1;
+  const df2 = (groupCount ** 2 - 1) / (3 * correctionTerm);
+  return {
+    name: "Welch's one-way ANOVA",
+    statisticLabel: 'F',
+    statistic: f,
+    degreesOfFreedom: `${df1}, ${df2.toFixed(1)}`,
+    p: fRightTailP(f, df1, df2),
+    detail: `${groupCount} groups; unequal variances are allowed.`,
   };
 }
 
@@ -667,7 +730,7 @@ export function normalityTests(
     }
   }
 
-  if (finite.length >= 8) {
+  if (finite.length >= 20) {
     try {
       const result = engine.dagostinoKSquared(sample);
       if (
@@ -680,7 +743,7 @@ export function normalityTests(
           statistic: result.k2_statistic,
           degreesOfFreedom: '2',
           p: result.p_value,
-          detail: `Omnibus skewness and kurtosis test; ${finite.length} model residuals.`,
+          detail: `Secondary omnibus skewness and kurtosis test; ${finite.length} model residuals.`,
         });
       }
     } catch {
@@ -878,7 +941,8 @@ export function factorialAnova(
     );
     if (!reduced) return null;
     const df1 = full.p - reduced.p;
-    const f = (reduced.rss - full.rss) / df1 / (full.rss / df2);
+    const extraSumOfSquares = Math.max(0, reduced.rss - full.rss);
+    const f = extraSumOfSquares / df1 / (full.rss / df2);
     return { effect, df1, df2, f, p: fRightTailP(f, df1, df2) };
   };
 

@@ -32,6 +32,19 @@ put("one_way.df1", one_way_table["ind", "Df"])
 put("one_way.df2", one_way_table["Residuals", "Df"])
 put("one_way.p", one_way_table["ind", "Pr(>F)"])
 
+welch_one_way <- oneway.test(values ~ ind, data = one_way, var.equal = FALSE)
+put("welch_one_way.statistic", unname(welch_one_way$statistic))
+put("welch_one_way.df1", unname(welch_one_way$parameter[[1]]))
+# The application intentionally displays Welch's denominator df to one decimal.
+put("welch_one_way.df2", round(unname(welch_one_way$parameter[[2]]), 1))
+put("welch_one_way.p", welch_one_way$p.value)
+for (degrees_of_freedom in c(1, 2, 5, 10, 30, 100)) {
+  put(
+    paste0("t_critical_95.df_", degrees_of_freedom),
+    qt(0.975, degrees_of_freedom)
+  )
+}
+
 pearson <- cor.test(data$pearson$x, data$pearson$y, method = "pearson")
 put("pearson.statistic", unname(pearson$estimate))
 put("pearson.df", unname(pearson$parameter))

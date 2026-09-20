@@ -40,6 +40,13 @@ addTest(
 
 const oneWayGroups = Object.values(data.one_way);
 addTest('one_way', statistics.oneWayAnova(oneWayGroups));
+addTest('welch_one_way', statistics.welchOneWayAnova(oneWayGroups));
+for (const degreesOfFreedom of [1, 2, 5, 10, 30, 100]) {
+  set(
+    `t_critical_95.df_${degreesOfFreedom}`,
+    statistics.studentTCritical95(degreesOfFreedom),
+  );
+}
 addTest(
   'pearson',
   statistics.pearsonCorrelation(
