@@ -732,6 +732,8 @@ export default function Home() {
   const [yLabel, setYLabel] = useState("");
   const [primaryColor, setPrimaryColor] = useState("#f92080");
   const [secondaryColor, setSecondaryColor] = useState("#111827");
+  const [volcanoDownColor, setVolcanoDownColor] = useState("#3f526d");
+  const [volcanoNsColor, setVolcanoNsColor] = useState("#b9bdc5");
   const [seriesColorOverrides, setSeriesColorOverrides] =
     useState<Record<string, string>>(demoSeriesColorOverrides);
   const [pointColorMode, setPointColorMode] = useState<PointColorMode>("series");
@@ -2253,15 +2255,38 @@ export default function Home() {
                   </p>
                 </div>
               ) : plotType === "volcano" ? (
-                <label className="grid gap-1.5 text-xs font-medium">
-                  Up / highlight colour
-                  <Input
-                    type="color"
-                    className="h-9 p-1"
-                    value={primaryColor}
-                    onChange={(event) => setPrimaryColor(event.target.value)}
-                  />
-                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <label className="grid gap-1.5 text-xs font-medium">
+                    Up colour
+                    <Input
+                      type="color"
+                      aria-label="Up-regulated point colour"
+                      className="h-9 w-full p-1"
+                      value={primaryColor}
+                      onChange={(event) => setPrimaryColor(event.target.value)}
+                    />
+                  </label>
+                  <label className="grid gap-1.5 text-xs font-medium">
+                    Down colour
+                    <Input
+                      type="color"
+                      aria-label="Down-regulated point colour"
+                      className="h-9 w-full p-1"
+                      value={volcanoDownColor}
+                      onChange={(event) => setVolcanoDownColor(event.target.value)}
+                    />
+                  </label>
+                  <label className="grid gap-1.5 text-xs font-medium">
+                    NS colour
+                    <Input
+                      type="color"
+                      aria-label="Non-significant point colour"
+                      className="h-9 w-full p-1"
+                      value={volcanoNsColor}
+                      onChange={(event) => setVolcanoNsColor(event.target.value)}
+                    />
+                  </label>
+                </div>
               ) : null}
               {plotType === "xy" ? (
                 <label className="grid gap-1.5 text-xs font-medium">
@@ -2696,7 +2721,9 @@ export default function Home() {
                             setPostHocAdjustment(event.target.value as PostHocAdjustment)
                           }
                         >
-                          <NativeSelectOption value="holm">Holm (recommended)</NativeSelectOption>
+                          <NativeSelectOption value="holm">
+                            Holm (safe general default)
+                          </NativeSelectOption>
                           <NativeSelectOption value="bonferroni">Bonferroni</NativeSelectOption>
                           <NativeSelectOption value="sidak">Šidák</NativeSelectOption>
                           <NativeSelectOption value="bh-fdr">
@@ -3420,8 +3447,8 @@ export default function Home() {
                               direction === "Up"
                                 ? primaryColor
                                 : direction === "Down"
-                                  ? "#3f526d"
-                                  : "#b9bdc5"
+                                  ? volcanoDownColor
+                                  : volcanoNsColor
                             }
                             fillOpacity={direction === "NS" ? 0.48 : pointOpacity / 100}
                             shape={(props) => {
@@ -3430,8 +3457,8 @@ export default function Home() {
                                 payload.direction === "Up"
                                   ? primaryColor
                                   : payload.direction === "Down"
-                                    ? "#3f526d"
-                                    : "#b9bdc5";
+                                    ? volcanoDownColor
+                                    : volcanoNsColor;
                               const specificallyRequested = requestedVolcanoLabels.has(
                                 payload.label.trim().toLocaleLowerCase(),
                               );
@@ -3765,7 +3792,7 @@ export default function Home() {
                 reference datasets; method-specific limitations still apply.
               </p>
               <p>
-                Version 1.0.4 · Updated 19 September 2026 ·{" "}
+                Version 1.0.5 · Updated 20 September 2026 ·{" "}
                 <a
                   className="font-medium text-primary underline"
                   href="https://cariacolab.com/contact/"
