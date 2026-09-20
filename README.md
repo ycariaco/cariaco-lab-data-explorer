@@ -4,7 +4,7 @@ Independent, static version of the Cariaco Lab Data Explorer. It does not use
 ChatGPT, the OpenAI API, a database, or an application server. Uploaded and
 pasted datasets are processed in the visitor's browser.
 
-Version 1.1.2, updated 20 September 2026. See [VALIDATION.md](VALIDATION.md)
+Version 1.1.4, updated 20 September 2026. See [VALIDATION.md](VALIDATION.md)
 for the implemented-method assumptions, the reproducible R benchmark, and the
 remaining limitations.
 

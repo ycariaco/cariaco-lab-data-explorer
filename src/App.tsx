@@ -936,7 +936,7 @@ function PairedTrajectoryPlot({
   subjects,
   width,
   height,
-  color,
+  colors,
   pointSize,
   pointOpacity,
   xLabel,
@@ -948,7 +948,7 @@ function PairedTrajectoryPlot({
   subjects: Array<{ subject: string; values: Record<string, number> }>;
   width: number;
   height: number;
-  color: string;
+  colors: Map<string, string>;
   pointSize: number;
   pointOpacity: number;
   xLabel: string;
@@ -957,17 +957,50 @@ function PairedTrajectoryPlot({
   axisTitleFontSize: number;
 }) {
   const allValues = subjects.flatMap((entry) => Object.values(entry.values));
-  if (groups.length < 2 || !subjects.length || !allValues.length) {
-    return <EmptyState text="Choose a subject ID and at least two conditions containing repeated observations." />;
+  if (groups.length < 2) {
+    return <EmptyState text="Choose the condition column under Repeated conditions. It must contain at least two conditions, such as Baseline and Post-treatment." />;
   }
-  const margin = { top: 24, right: 28, bottom: 78, left: 82 };
-  const [minimum, maximum] = chartExtent(allValues);
+  if (!subjects.length || !allValues.length) {
+    return <EmptyState text="Choose the column containing the repeated subject IDs, such as subject_id." />;
+  }
+  if (!subjects.some((entry) => Object.keys(entry.values).length >= 2)) {
+    return <EmptyState text="No subject ID occurs in at least two selected conditions. Each subject must have one row for every condition being connected." />;
+  }
+  const margin = { top: 30, right: 42, bottom: 78, left: 82 };
+  const rawMinimum = Math.min(...allValues);
+  const rawMaximum = Math.max(...allValues);
+  const rawStep = (rawMaximum - rawMinimum || Math.max(1, Math.abs(rawMaximum) * 0.1)) / 5;
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+  const normalizedStep = rawStep / magnitude;
+  const niceStep =
+    (normalizedStep <= 1
+      ? 1
+      : normalizedStep <= 2
+        ? 2
+        : normalizedStep <= 2.5
+          ? 2.5
+          : normalizedStep <= 5
+            ? 5
+            : 10) * magnitude;
+  const minimum = Math.floor(rawMinimum / niceStep) * niceStep;
+  const maximum = Math.ceil(rawMaximum / niceStep) * niceStep;
   const y = linearScale(minimum, maximum, height - margin.bottom, margin.top);
   const x = (index: number) =>
     groups.length === 1
       ? width / 2
       : margin.left + ((width - margin.left - margin.right) * index) / (groups.length - 1);
-  const yTicks = Array.from({ length: 6 }, (_, index) => minimum + ((maximum - minimum) * index) / 5);
+  const yTicks = Array.from(
+    { length: Math.round((maximum - minimum) / niceStep) + 1 },
+    (_, index) => minimum + niceStep * index,
+  );
+  const groupSummaries = groups.map((groupName) => {
+    const values = subjects
+      .map((entry) => entry.values[groupName])
+      .filter((value) => Number.isFinite(value));
+    const mean = average(values);
+    const sem = values.length > 1 ? Math.sqrt(sampleVariance(values)) / Math.sqrt(values.length) : 0;
+    return { groupName, mean, sem, n: values.length };
+  });
   return (
     <svg width={width} height={height} role="img" aria-label="Paired subject trajectories">
       <rect width={width} height={height} fill="#ffffff" />
@@ -977,7 +1010,7 @@ function PairedTrajectoryPlot({
           <text x={margin.left - 10} y={y(tick)} textAnchor="end" dominantBaseline="central" fontSize={tickFontSize} fill="#374151">{formatNumber(tick)}</text>
         </g>
       ))}
-      {subjects.map((entry, subjectIndex) => {
+      {subjects.map((entry) => {
         const points = groups.flatMap((groupName, groupIndex) =>
           Number.isFinite(entry.values[groupName])
             ? [{ x: x(groupIndex), y: y(entry.values[groupName]), groupName }]
@@ -986,13 +1019,48 @@ function PairedTrajectoryPlot({
         return (
           <g key={entry.subject}>
             {points.length > 1 ? (
-              <polyline points={points.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={color} strokeOpacity={0.3 + (subjectIndex % 3) * 0.08} strokeWidth={1.4} />
+              <polyline
+                points={points.map((point) => `${point.x},${point.y}`).join(" ")}
+                fill="none"
+                stroke="#94a3b8"
+                strokeOpacity={0.55}
+                strokeWidth={1.35}
+              />
             ) : null}
             {points.map((point) => (
-              <circle key={point.groupName} cx={point.x} cy={point.y} r={pointSize / 2} fill={color} fillOpacity={pointOpacity / 100} stroke="#ffffff" strokeWidth={0.8}>
+              <circle
+                key={point.groupName}
+                cx={point.x}
+                cy={point.y}
+                r={pointSize / 2}
+                fill={colors.get(point.groupName) ?? "#f92080"}
+                fillOpacity={pointOpacity / 100}
+                stroke="#ffffff"
+                strokeWidth={0.9}
+              >
                 <title>{`${entry.subject} · ${point.groupName}: ${formatNumber(entry.values[point.groupName])}`}</title>
               </circle>
             ))}
+          </g>
+        );
+      })}
+      {groupSummaries.map((summary, index) => {
+        const center = x(index);
+        const color = colors.get(summary.groupName) ?? "#111827";
+        return (
+          <g key={`summary-${summary.groupName}`}>
+            <line
+              x1={center}
+              x2={center}
+              y1={y(summary.mean - summary.sem)}
+              y2={y(summary.mean + summary.sem)}
+              stroke={color}
+              strokeWidth={2.2}
+            />
+            <line x1={center - 8} x2={center + 8} y1={y(summary.mean - summary.sem)} y2={y(summary.mean - summary.sem)} stroke={color} strokeWidth={2.2} />
+            <line x1={center - 8} x2={center + 8} y1={y(summary.mean + summary.sem)} y2={y(summary.mean + summary.sem)} stroke={color} strokeWidth={2.2} />
+            <line x1={center - 22} x2={center + 22} y1={y(summary.mean)} y2={y(summary.mean)} stroke={color} strokeWidth={3.2} />
+            <title>{`${summary.groupName}: mean ${formatNumber(summary.mean)}, SEM ${formatNumber(summary.sem)}, n=${summary.n}`}</title>
           </g>
         );
       })}
@@ -2846,6 +2914,7 @@ export default function Home() {
   function updateDataset(nextRows: DataRow[], nextName: string, syncEditor = true) {
     const nextNumbers = numericColumns(nextRows);
     const nextCategories = categoricalColumns(nextRows);
+    const nextColumns = Object.keys(nextRows[0] ?? {});
     if (!nextRows.length || !nextNumbers.length) {
       setError("The file needs a header row and at least one numeric column.");
       return;
@@ -2857,24 +2926,35 @@ export default function Home() {
     const likelyEffect =
       nextNumbers.find((column) => /log2|effect|fold/i.test(column)) ?? nextNumbers[0];
     const likelyLabel =
-      Object.keys(nextRows[0]).find((column) =>
+      nextColumns.find((column) =>
         /gene|protein|metabolite|feature|sample|name|id/i.test(column),
-      ) ?? Object.keys(nextRows[0])[0];
+      ) ?? nextColumns[0];
+    const likelySubject =
+      nextColumns.find((column) =>
+        /subject|participant|patient|donor|animal|individual|sample.*id|^id$/i.test(column),
+      ) ?? "";
+    const likelyGroup =
+      nextCategories.find((column) =>
+        /condition|treatment|time|visit|period|stage|group|phase/i.test(column),
+      ) ??
+      nextCategories.find((column) => column !== likelySubject) ??
+      nextCategories[0] ??
+      "__none__";
     setRows(nextRows);
     setFileName(nextName);
     if (syncEditor) setDataText(rowsToTabDelimited(nextRows));
     setOutcome(likelyOutcome);
     setXVariable(nextNumbers.find((column) => column !== likelyOutcome) ?? likelyOutcome);
-    setGroup(nextCategories[0] ?? "__none__");
+    setGroup(likelyGroup);
     setFactor2("__none__");
-    setSubject("__none__");
+    setSubject(likelySubject || "__none__");
     setEffectVariable(likelyEffect);
     setPVariable(likelyP);
     setLabelVariable(likelyLabel);
     setHeatmapColumns(nextNumbers.slice(0, 8));
     setPcaColumns(nextNumbers.slice(0, 8));
     setSetItemVariable(likelyLabel);
-    setSetMembershipVariable(nextCategories[0] ?? "");
+    setSetMembershipVariable(likelyGroup === "__none__" ? "" : likelyGroup);
     setPlotTitle("");
     setXLabel("");
     setYLabel("");
@@ -2894,6 +2974,17 @@ export default function Home() {
     const nextColumns = Object.keys(parsed[0]);
     const likelyOutcome =
       nextNumbers.find((column) => !/dose|time|id/i.test(column)) ?? nextNumbers[0];
+    const likelySubject =
+      nextColumns.find((column) =>
+        /subject|participant|patient|donor|animal|individual|sample.*id|^id$/i.test(column),
+      ) ?? "";
+    const likelyGroup =
+      nextCategories.find((column) =>
+        /condition|treatment|time|visit|period|stage|group|phase/i.test(column),
+      ) ??
+      nextCategories.find((column) => column !== likelySubject) ??
+      nextCategories[0] ??
+      "__none__";
     setRows(parsed);
     setFileName("Live pasted data");
     setOutcome((current) => (nextNumbers.includes(current) ? current : likelyOutcome));
@@ -2902,16 +2993,20 @@ export default function Home() {
         ? current
         : (nextNumbers.find((column) => column !== likelyOutcome) ?? likelyOutcome),
     );
-    setGroup((current) =>
-      current === "__none__" || nextCategories.includes(current)
-        ? current
-        : (nextCategories[0] ?? "__none__"),
-    );
+    setGroup((current) => {
+      if (
+        nextCategories.includes(current) &&
+        !(plotType === "paired" && current === likelySubject)
+      ) return current;
+      return likelyGroup;
+    });
     setFactor2((current) =>
       current === "__none__" || nextCategories.includes(current) ? current : "__none__",
     );
     setSubject((current) =>
-      current === "__none__" || nextCategories.includes(current) ? current : "__none__",
+      current !== "__none__" && nextColumns.includes(current)
+        ? current
+        : (likelySubject || "__none__"),
     );
     setEffectVariable((current) => (nextNumbers.includes(current) ? current : nextNumbers[0]));
     setPVariable((current) =>
@@ -2977,11 +3072,23 @@ export default function Home() {
         ) ?? categories.find((column) => column !== group);
       if (suggestedSecondFactor) setFactor2(suggestedSecondFactor);
     }
-    if (nextPlot === "paired" && subject === "__none__") {
+    if (nextPlot === "paired") {
       const suggestedSubject =
         allColumns.find((column) => /subject|donor|patient|animal|sample.*id|^id$/i.test(column)) ??
         categories.find((column) => column !== group);
-      if (suggestedSubject) setSubject(suggestedSubject);
+      const suggestedCondition =
+        categories.find((column) =>
+          /condition|treatment|time|visit|period|stage|group|phase/i.test(column),
+        ) ?? categories.find((column) => column !== suggestedSubject);
+      if (suggestedSubject && (subject === "__none__" || !allColumns.includes(subject))) {
+        setSubject(suggestedSubject);
+      }
+      if (
+        suggestedCondition &&
+        (group === "__none__" || group === suggestedSubject || !categories.includes(group))
+      ) {
+        setGroup(suggestedCondition);
+      }
     }
     if (nextPlot === "dose") {
       const suggestedDose = numbers.find((column) => /dose|concentration|conc|time/i.test(column));
@@ -3383,23 +3490,31 @@ export default function Home() {
                 </label>
               ) : null}
               {plotType === "paired" ? (
-                <label className="grid gap-1.5 text-xs font-medium">
-                  Subject / repeated-measure ID
-                  <NativeSelect
-                    className="w-full"
-                    value={subject}
-                    onChange={(event) => setSubject(event.target.value)}
-                  >
-                    <NativeSelectOption value="__none__">Select a subject ID</NativeSelectOption>
-                    {allColumns
-                      .filter((column) => column !== outcome && column !== group)
-                      .map((column) => (
-                        <NativeSelectOption key={column} value={column}>
-                          {column}
-                        </NativeSelectOption>
-                      ))}
-                  </NativeSelect>
-                </label>
+                <div className="grid gap-2">
+                  <label className="grid gap-1.5 text-xs font-medium">
+                    Subject / repeated-measure ID
+                    <NativeSelect
+                      className="w-full"
+                      value={subject}
+                      onChange={(event) => setSubject(event.target.value)}
+                    >
+                      <NativeSelectOption value="__none__">Select a subject ID</NativeSelectOption>
+                      {allColumns
+                        .filter((column) => column !== outcome && column !== group)
+                        .map((column) => (
+                          <NativeSelectOption key={column} value={column}>
+                            {column}
+                          </NativeSelectOption>
+                        ))}
+                    </NativeSelect>
+                  </label>
+                  {subject !== "__none__" && group !== "__none__" ? (
+                    <p className="rounded-md bg-muted/60 px-2 py-1.5 text-[10px] leading-relaxed text-muted-foreground">
+                      Connecting repeated <strong>{subject}</strong> values across the conditions in
+                      <strong> {group}</strong>.
+                    </p>
+                  ) : null}
+                </div>
               ) : null}
               {plotType === "dose" ? (
                 <label className="flex items-center gap-2 text-xs font-medium">
@@ -4739,7 +4854,12 @@ export default function Home() {
                     subjects={pairedSubjects}
                     width={plotWidth}
                     height={plotHeight}
-                    color={primaryColor}
+                    colors={new Map(
+                      summaries.map((summary, index) => [
+                        summary.group,
+                        seriesColor(index, summary.group),
+                      ]),
+                    )}
                     pointSize={pointSize}
                     pointOpacity={pointOpacity}
                     xLabel={displayXLabel}
@@ -5458,7 +5578,7 @@ export default function Home() {
                 reference datasets; method-specific limitations still apply.
               </p>
               <p>
-                Version 1.1.2 · Updated 20 September 2026 ·{" "}
+                Version 1.1.4 · Updated 20 September 2026 ·{" "}
                 <a
                   className="font-medium text-primary underline"
                   href="https://cariacolab.com/contact/"
