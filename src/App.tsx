@@ -985,10 +985,14 @@ function PairedTrajectoryPlot({
   const minimum = Math.floor(rawMinimum / niceStep) * niceStep;
   const maximum = Math.ceil(rawMaximum / niceStep) * niceStep;
   const y = linearScale(minimum, maximum, height - margin.bottom, margin.top);
+  const availableWidth = width - margin.left - margin.right;
+  const horizontalInset = Math.min(120, Math.max(56, availableWidth * 0.18));
   const x = (index: number) =>
     groups.length === 1
       ? width / 2
-      : margin.left + ((width - margin.left - margin.right) * index) / (groups.length - 1);
+      : margin.left +
+        horizontalInset +
+        ((availableWidth - horizontalInset * 2) * index) / (groups.length - 1);
   const yTicks = Array.from(
     { length: Math.round((maximum - minimum) / niceStep) + 1 },
     (_, index) => minimum + niceStep * index,
@@ -5578,7 +5582,7 @@ export default function Home() {
                 reference datasets; method-specific limitations still apply.
               </p>
               <p>
-                Version 1.1.4 · Updated 20 September 2026 ·{" "}
+                Version 1.1.5 · Updated 20 September 2026 ·{" "}
                 <a
                   className="font-medium text-primary underline"
                   href="https://cariacolab.com/contact/"
